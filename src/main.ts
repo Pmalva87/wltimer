@@ -1,8 +1,7 @@
 import "./styles.css";
 import { renderLibrary } from "./screens/library";
-import { renderEditor } from "./screens/editor";
+import { renderBuilder } from "./screens/builder";
 import { renderRun } from "./screens/run";
-import { renderQuick } from "./screens/quick";
 
 type Cleanup = (() => void) | void;
 
@@ -18,9 +17,7 @@ async function route() {
   const [, screen, arg] = hash.split("/");
   const slug = arg ? decodeURIComponent(arg) : null;
   if (screen === "edit") {
-    cleanup = await renderEditor(app, slug);
-  } else if (screen === "quick") {
-    cleanup = await renderQuick(app);
+    cleanup = await renderBuilder(app, slug);
   } else if (screen === "run" && slug) {
     cleanup = await renderRun(app, slug);
   } else {

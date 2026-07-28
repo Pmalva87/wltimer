@@ -17,6 +17,43 @@ export type Preview =
   | { status: "ok"; name: string; block_count: number; total_secs: number }
   | { status: "err"; errors: ParseError[] };
 
+export interface Block {
+  name: string;
+  description_md: string;
+  intervals: number;
+  work_secs: number;
+  rest_secs: number | null;
+  rest_after_secs: number | null;
+  color: string | null;
+}
+
+export interface Workout {
+  name: string;
+  blocks: Block[];
+}
+
+export type ParseFull =
+  | { status: "ok"; workout: Workout }
+  | { status: "err"; errors: ParseError[] };
+
+export const PREPARE_SECS = 10;
+
+/** Mirrors Workout::flatten totals: prepare + work + in-block rests + between-block rests. */
+export function workoutTotalSecs(w: Workout): number {
+  const last = w.blocks.length - 1;
+  return (
+    PREPARE_SECS +
+    w.blocks.reduce(
+      (sum, b, i) =>
+        sum +
+        b.intervals * b.work_secs +
+        (b.intervals - 1) * (b.rest_secs ?? 0) +
+        (i < last ? (b.rest_after_secs ?? 0) : 0),
+      0,
+    )
+  );
+}
+
 export type PhaseKind = "prepare" | "work" | "rest" | "block_rest";
 
 export interface Phase {
@@ -69,9 +106,9 @@ export const api = {
   deleteWorkout: (slug: string) => invoke<void>("delete_workout", { slug }),
   parsePreview: (source: string) => invoke<Preview>("parse_preview", { source }),
   startWorkout: (slug: string) => invoke<RunPlan>("start_workout", { slug }),
-  startQuick: (
-    parts: { intervals: number; workSecs: number; restSecs: number; restAfterSecs: number }[],
-  ) => invoke<RunPlan>("start_quick", { parts }),
+  startCustom: (workout: Workout) => invoke<RunPlan>("start_custom", { workout }),
+  parseFull: (source: string) => invoke<ParseFull>("parse_full", { source }),
+  serializeWorkout: (workout: Workout) => invoke<string>("serialize_workout", { workout }),
   pause: () => invoke<void>("pause_timer"),
   resume: () => invoke<void>("resume_timer"),
   stop: () => invoke<void>("stop_timer"),

@@ -2,12 +2,17 @@
 
 Weightlifting interval timer for Android, built with Rust + Tauri 2.
 
-A workout is a sequence of **blocks** (exercises), each with its own number of
+A workout is a sequence of **parts** (exercises), each with its own number of
 intervals, work time, optional rest between intervals, and optional rest after
-the block. Workouts are written in markdown, saved on the device, and the
-markdown prose of each block is shown on screen while it runs. Work and rest
-phases get distinct colors, with beeps + amber flashes at 3‑2‑1 before every
-transition and distinct sounds for work/rest starts.
+the part. Workouts are built in a single form-based **builder** (steppers for
+times/intervals, optional per-part names and notes/cues) which can START a
+one-off timer immediately or Save to the library. Markdown is the storage and
+interchange format: upload a `.md` file to populate the builder, flip the
+"Markdown" toggle to edit the same workout as text, or Copy a workout's
+markdown to the clipboard to export it. Notes are shown on screen while the
+part runs. Work and rest phases get distinct colors, with beeps + amber
+flashes at 3‑2‑1 before every transition, distinct sounds for work/rest
+starts, and a large whole-workout countdown at the top of the run screen.
 
 ## Workout format
 
@@ -36,8 +41,8 @@ Cues: brace hard, hit depth, drive up fast.
 
 ## Project layout
 
-- `core/` — pure Rust crate: data model, markdown→workout parser, timer engine
-  (all unit-tested; no Tauri dependency)
+- `core/` — pure Rust crate: data model, markdown↔workout parser/serializer,
+  timer engine (all unit-tested; no Tauri dependency)
 - `src-tauri/` — Tauri shell: file store (`.md` files in app data), commands,
   200 ms ticker emitting `timer:tick` / `timer:cue` events
 - `src/` — frontend (vanilla TypeScript + Vite): library, editor, run screens;

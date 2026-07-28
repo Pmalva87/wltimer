@@ -1,8 +1,16 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { api, fmtDuration, type Cue, type PhaseKind, type RunPlan, type Snapshot } from "../api";
+import {
+  api,
+  fmtDuration,
+  workoutTotalSecs,
+  type Cue,
+  type PhaseKind,
+  type RunPlan,
+  type Snapshot,
+} from "../api";
 import { initAudio, sounds, vibrate } from "../audio";
 import { esc } from "./library";
-import { loadQuick, quickTotalSecs } from "./quick";
+import { loadRunDraft } from "./builder";
 
 const COLORS: Record<PhaseKind, string> = {
   prepare: "#334155",
@@ -18,9 +26,9 @@ const LABELS: Record<PhaseKind, string> = {
   block_rest: "BLOCK REST",
 };
 
-/** `target` is a saved workout slug, or `quick` (settings read from local storage). */
+/** `target` is a saved workout slug, or `draft` (unsaved workout from the builder). */
 export async function renderRun(root: HTMLElement, target: string) {
-  const quick = target === "quick" ? loadQuick() : null;
+  const draft = target === "draft" ? loadRunDraft() : null;
   root.innerHTML = `
     <div class="screen run" id="runscreen">
       <header class="topbar run-top">
@@ -157,8 +165,8 @@ export async function renderRun(root: HTMLElement, target: string) {
   el("start").addEventListener("click", async () => {
     initAudio();
     try {
-      plan = quick
-        ? await api.startQuick(quick.parts)
+      plan = draft
+        ? await api.startCustom(draft)
         : await api.startWorkout(target);
     } catch (e) {
       el("ovmeta").textContent = String(e);
@@ -169,12 +177,17 @@ export async function renderRun(root: HTMLElement, target: string) {
   });
 
   // Show name/duration on the start overlay without starting the timer.
-  if (quick) {
-    el("ovname").textContent = "Quick Timer";
-    el("ovmeta").textContent =
-      quick.parts
-        .map((p) => `${p.intervals} × ${fmtDuration(p.workSecs)}`)
-        .join("  ·  ") + `  ·  total ${fmtDuration(quickTotalSecs(quick))}`;
+  if (target === "draft") {
+    if (draft) {
+      el("ovname").textContent = draft.name;
+      el("ovmeta").textContent =
+        draft.blocks
+          .map((b) => `${b.intervals} × ${fmtDuration(b.work_secs)}`)
+          .join("  ·  ") + `  ·  total ${fmtDuration(workoutTotalSecs(draft))}`;
+    } else {
+      el("ovname").textContent = "Nothing to run";
+      el("ovmeta").textContent = "build a workout first";
+    }
   } else {
     el("ovname").textContent = target;
     void api.listWorkouts().then((items) => {

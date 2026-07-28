@@ -14,6 +14,38 @@ fn err(line: usize, message: impl Into<String>) -> ParseError {
     }
 }
 
+/// Format seconds as `M:SS` (the canonical form `parse_duration` accepts).
+fn fmt_secs(secs: u32) -> String {
+    format!("{}:{:02}", secs / 60, secs % 60)
+}
+
+/// Serialize a workout back to the markdown format `parse_workout` reads.
+/// For any workout that came out of the parser, parsing the result yields an
+/// equal workout (round-trip).
+pub fn workout_to_markdown(w: &Workout) -> String {
+    let mut out = format!("# {}\n", w.name);
+    for b in &w.blocks {
+        out.push_str(&format!("\n## {}\n", b.name));
+        out.push_str(&format!("- intervals: {}\n", b.intervals));
+        out.push_str(&format!("- work: {}\n", fmt_secs(b.work_secs)));
+        if let Some(r) = b.rest_secs {
+            out.push_str(&format!("- rest: {}\n", fmt_secs(r)));
+        }
+        if let Some(r) = b.rest_after_secs {
+            out.push_str(&format!("- rest after: {}\n", fmt_secs(r)));
+        }
+        if let Some(c) = &b.color {
+            out.push_str(&format!("- color: {c}\n"));
+        }
+        if !b.description_md.is_empty() {
+            out.push('\n');
+            out.push_str(&b.description_md);
+            out.push('\n');
+        }
+    }
+    out
+}
+
 /// Render a markdown fragment to HTML (used for block descriptions).
 pub fn render_markdown(md: &str) -> String {
     let mut out = String::new();
@@ -313,5 +345,39 @@ Cues: brace hard, hit depth, drive up fast.
     fn renders_markdown() {
         let html = render_markdown("**bold** cue");
         assert!(html.contains("<strong>bold</strong>"));
+    }
+
+    #[test]
+    fn serializer_round_trips_full_document() {
+        let w = parse_workout(FULL).unwrap();
+        let md = workout_to_markdown(&w);
+        assert_eq!(parse_workout(&md).unwrap(), w);
+    }
+
+    #[test]
+    fn serializer_round_trips_minimal_and_multiline_notes() {
+        let src = "# W\n\n## A\n- work: 30\n\nline one\n\n- a note bullet\nline two\n\n## B\n- intervals: 2\n- work: 45\n- rest: 10\n";
+        let w = parse_workout(src).unwrap();
+        let md = workout_to_markdown(&w);
+        assert_eq!(parse_workout(&md).unwrap(), w);
+    }
+
+    #[test]
+    fn serializer_output_shape() {
+        let w = parse_workout("# W\n\n## A\n- intervals: 2\n- work: 90\n- rest after: 120\n").unwrap();
+        let md = workout_to_markdown(&w);
+        assert!(md.contains("# W\n"));
+        assert!(md.contains("## A\n"));
+        assert!(md.contains("- work: 1:30\n"));
+        assert!(md.contains("- rest after: 2:00\n"));
+        assert!(!md.contains("- rest:"));
+        assert!(!md.contains("- color:"));
+    }
+
+    #[test]
+    fn fmt_secs_formats() {
+        assert_eq!(fmt_secs(90), "1:30");
+        assert_eq!(fmt_secs(5), "0:05");
+        assert_eq!(fmt_secs(3700), "61:40");
     }
 }

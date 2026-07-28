@@ -4,7 +4,7 @@ use std::sync::Mutex;
 use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager, State};
 use wltimer_core::engine::{Engine, Snapshot};
-use wltimer_core::model::{Block, Phase, Workout};
+use wltimer_core::model::{Phase, Workout};
 use wltimer_core::parser::{self, ParseError};
 
 pub struct AppState {
@@ -78,53 +78,47 @@ pub fn parse_preview(source: String) -> Preview {
     }
 }
 
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct QuickPart {
-    pub intervals: u32,
-    pub work_secs: u32,
-    pub rest_secs: u32,
-    /// Rest after this part; only takes effect when another part follows.
-    pub rest_after_secs: u32,
+/// Result of parsing a full document for the builder screen.
+#[derive(Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum ParseFull {
+    Ok { workout: Workout },
+    Err { errors: Vec<ParseError> },
 }
 
-/// Start a one-off timer built from UI parameters instead of a saved markdown
-/// workout. Each part becomes a block.
+/// Parse markdown into the full workout structure (populates the builder UI).
 #[tauri::command]
-pub fn start_quick(
+pub fn parse_full(source: String) -> ParseFull {
+    match parser::parse_workout(&source) {
+        Ok(workout) => ParseFull::Ok { workout },
+        Err(errors) => ParseFull::Err { errors },
+    }
+}
+
+/// Serialize a builder-built workout to its canonical markdown form.
+#[tauri::command]
+pub fn serialize_workout(workout: Workout) -> String {
+    parser::workout_to_markdown(&workout)
+}
+
+/// Start a workout built directly in the UI, without saving it first.
+#[tauri::command]
+pub fn start_custom(
     app: AppHandle,
     state: State<AppState>,
-    parts: Vec<QuickPart>,
+    workout: Workout,
 ) -> Result<RunPlan, String> {
-    if parts.is_empty() {
+    if workout.blocks.is_empty() {
         return Err("add at least one part".into());
     }
-    let single = parts.len() == 1;
-    let blocks = parts
-        .iter()
-        .enumerate()
-        .map(|(i, p)| {
-            if p.intervals < 1 {
-                return Err(format!("part {}: intervals must be at least 1", i + 1));
-            }
-            if p.work_secs < 1 {
-                return Err(format!("part {}: work time must be at least 1 second", i + 1));
-            }
-            Ok(Block {
-                name: if single { "Work".into() } else { format!("Part {}", i + 1) },
-                description_md: String::new(),
-                intervals: p.intervals,
-                work_secs: p.work_secs,
-                rest_secs: (p.rest_secs > 0).then_some(p.rest_secs),
-                rest_after_secs: (p.rest_after_secs > 0).then_some(p.rest_after_secs),
-                color: None,
-            })
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-    let workout = Workout {
-        name: "Quick Timer".into(),
-        blocks,
-    };
+    for (i, b) in workout.blocks.iter().enumerate() {
+        if b.intervals < 1 {
+            return Err(format!("part {}: intervals must be at least 1", i + 1));
+        }
+        if b.work_secs < 1 {
+            return Err(format!("part {}: work time must be at least 1 second", i + 1));
+        }
+    }
     start(app, state, workout)
 }
 

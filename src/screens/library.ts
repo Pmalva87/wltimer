@@ -1,4 +1,5 @@
 import { api, fmtDuration } from "../api";
+import { copyText } from "../clipboard";
 
 export async function renderLibrary(root: HTMLElement) {
   const items = await api.listWorkouts();
@@ -6,7 +7,6 @@ export async function renderLibrary(root: HTMLElement) {
     <div class="screen library">
       <header class="topbar">
         <h1>wltimer</h1>
-        <a class="btn" href="#/quick">⚡ Quick</a>
         <a class="btn primary" href="#/edit">+ New</a>
       </header>
       <ul class="workout-list">
@@ -34,6 +34,7 @@ export async function renderLibrary(root: HTMLElement) {
                          <div class="actions">
                            <a class="btn primary" href="#/run/${encodeURIComponent(w.slug)}">▶ Run</a>
                            <a class="btn" href="#/edit/${encodeURIComponent(w.slug)}">Edit</a>
+                           <button class="btn copy" data-slug="${esc(w.slug)}">⧉ Copy</button>
                            <button class="btn danger delete" data-slug="${esc(w.slug)}">Delete</button>
                          </div>
                        </li>`,
@@ -42,6 +43,17 @@ export async function renderLibrary(root: HTMLElement) {
         }
       </ul>
     </div>`;
+
+  // Export: copy the workout's markdown to the clipboard.
+  root.querySelectorAll<HTMLButtonElement>("button.copy").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const source = await api.getSource(btn.dataset.slug!);
+      btn.textContent = (await copyText(source)) ? "✓ Copied" : "Copy failed";
+      setTimeout(() => {
+        btn.textContent = "⧉ Copy";
+      }, 2000);
+    });
+  });
 
   // Two-tap delete: first tap arms the button, second within 3s confirms.
   root.querySelectorAll<HTMLButtonElement>("button.delete").forEach((btn) => {
