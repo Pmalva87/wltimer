@@ -1,20 +1,24 @@
 mod commands;
-mod store;
 
-use commands::AppState;
+use commands::{AppState, RunOrigin};
 use std::sync::Mutex;
 use tauri::Manager;
+use wltimer_core::days::DayStore;
 use wltimer_core::engine::Engine;
+use wltimer_core::plan::PlanStore;
+use wltimer_core::store::Store;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
-            let dir = app.path().app_data_dir()?.join("workouts");
-            let store = store::Store::new(dir)?;
+            let data = app.path().app_data_dir()?;
             app.manage(AppState {
                 engine: Mutex::new(Engine::new()),
-                store,
+                store: Store::new(data.join("workouts"))?,
+                days: DayStore::new(data.join("days"))?,
+                plans: PlanStore::new(data.join("plans"))?,
+                origin: Mutex::new(RunOrigin::None),
             });
             commands::spawn_ticker(app.handle().clone());
             Ok(())
@@ -25,10 +29,25 @@ pub fn run() {
             commands::save_workout,
             commands::delete_workout,
             commands::parse_preview,
-            commands::start_workout,
-            commands::start_custom,
             commands::parse_full,
             commands::serialize_workout,
+            commands::get_month,
+            commands::get_day,
+            commands::add_day_entry,
+            commands::add_day_from_library,
+            commands::update_day_entry,
+            commands::delete_day_entry,
+            commands::move_day_entry,
+            commands::promote_day_entry,
+            commands::parse_plan_preview,
+            commands::list_plans,
+            commands::get_plan_source,
+            commands::save_plan,
+            commands::sync_plan,
+            commands::delete_plan,
+            commands::start_workout,
+            commands::start_custom,
+            commands::start_day_entry,
             commands::pause_timer,
             commands::resume_timer,
             commands::stop_timer,

@@ -39,6 +39,27 @@ Cues: brace hard, hit depth, drive up fast.
   `rest after`, `color`. Times are seconds (`90`) or `M:SS` (`1:30`).
 - Everything else in the block is free markdown shown during the exercise.
 
+## Calendar
+
+The 📅 calendar schedules workouts on dates: upload a `.md`, pick from the
+library (a **copy** — day entries are independent of templates), or build one
+in place. Finishing any run records it on that day (planned entries flip to
+done with a timestamp; library/one-off runs append a done entry). Entries can
+be moved between days and explicitly promoted into the library.
+
+## Storage
+
+All app data lives in the private app-data directory, zstd-compressed
+per file:
+
+```
+workouts/<slug>.md.zst        # library templates: the markdown document
+days/<YYYY-MM-DD>.json.zst    # calendar: JSON array of entries, each with its
+                              # own markdown copy + status/completed_at/source
+```
+
+Legacy plain `.md` library files migrate automatically at startup.
+
 ## Project layout
 
 - `core/` — pure Rust crate: data model, markdown↔workout parser/serializer,

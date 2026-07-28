@@ -26,9 +26,13 @@ const LABELS: Record<PhaseKind, string> = {
   block_rest: "BLOCK REST",
 };
 
-/** `target` is a saved workout slug, or `draft` (unsaved workout from the builder). */
+/**
+ * `target` is a saved workout slug, `draft` (unsaved workout from the
+ * builder), or `@<date>:<index>` (calendar entry).
+ */
 export async function renderRun(root: HTMLElement, target: string) {
   const draft = target === "draft" ? loadRunDraft() : null;
+  const dayMatch = target.match(/^@(\d{4}-\d{2}-\d{2}):(\d+)$/);
   root.innerHTML = `
     <div class="screen run" id="runscreen">
       <header class="topbar run-top">
@@ -165,9 +169,11 @@ export async function renderRun(root: HTMLElement, target: string) {
   el("start").addEventListener("click", async () => {
     initAudio();
     try {
-      plan = draft
-        ? await api.startCustom(draft)
-        : await api.startWorkout(target);
+      plan = dayMatch
+        ? await api.startDayEntry(dayMatch[1], Number(dayMatch[2]))
+        : draft
+          ? await api.startCustom(draft)
+          : await api.startWorkout(target);
     } catch (e) {
       el("ovmeta").textContent = String(e);
       return;
@@ -177,7 +183,22 @@ export async function renderRun(root: HTMLElement, target: string) {
   });
 
   // Show name/duration on the start overlay without starting the timer.
-  if (target === "draft") {
+  if (dayMatch) {
+    el("ovname").textContent = dayMatch[1];
+    void api.getDay(dayMatch[1]).then(async (entries) => {
+      const entry = entries[Number(dayMatch[2])];
+      if (!entry) {
+        el("ovname").textContent = "Nothing to run";
+        el("ovmeta").textContent = "this calendar entry no longer exists";
+        return;
+      }
+      el("ovname").textContent = entry.name;
+      const parsed = await api.parseFull(entry.markdown);
+      if (parsed.status === "ok") {
+        el("ovmeta").textContent = `total ${fmtDuration(workoutTotalSecs(parsed.workout))}`;
+      }
+    });
+  } else if (target === "draft") {
     if (draft) {
       el("ovname").textContent = draft.name;
       el("ovmeta").textContent =

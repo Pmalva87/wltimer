@@ -76,12 +76,67 @@ body {
   font-size: 1.15rem;
 }
 
+/* ---- tab bar ---- */
+
+.tabbar {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border-top: 1px solid #334155;
+  background: var(--bg);
+  padding: 0.35rem 0 calc(0.35rem + env(safe-area-inset-bottom));
+}
+
+.tabbar .tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 1.25rem;
+  padding: 0.2rem 0;
+}
+
+.tabbar .tab span {
+  font-size: 0.7rem;
+}
+
+.tabbar .tab.active {
+  color: #fff;
+}
+
 /* ---- library ---- */
+
+.library-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 1rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 0.4rem;
+}
+
+.section-head .section-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.section-head h2 {
+  font-size: 0.85rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
 
 .workout-list {
   list-style: none;
-  overflow-y: auto;
-  padding: 0 1rem 1rem;
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
@@ -252,10 +307,11 @@ details.notes textarea {
 }
 
 .builder-tools.md-tools {
-  padding: 0 1rem calc(0.9rem + env(safe-area-inset-bottom));
+  padding: 0 1rem 0.9rem;
 }
 
 .builder .quick-form {
+  flex: 1;
   overflow-y: auto;
 }
 
@@ -289,6 +345,153 @@ details.notes textarea {
 
 .quick .btn.start {
   align-self: center;
+}
+
+/* ---- calendar ---- */
+
+.cal-scroll {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.calendar .topbar h1 {
+  font-size: 1.1rem;
+}
+
+.cal-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  padding: 0 1rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.25rem;
+  padding: 0.4rem 1rem 0.8rem;
+}
+
+.cal-cell {
+  aspect-ratio: 1;
+  border: none;
+  background: var(--panel);
+  border-radius: 0.6rem;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.cal-cell.blank {
+  background: transparent;
+  cursor: default;
+}
+
+.cal-cell.today {
+  outline: 1px solid var(--muted);
+}
+
+.cal-cell.selected {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+}
+
+.cal-cell .dots {
+  display: flex;
+  gap: 0.1rem;
+  min-height: 0.9rem;
+  align-items: center;
+}
+
+.cal-ico {
+  font-size: 0.7rem;
+  line-height: 1;
+}
+
+.day-panel {
+  border-top: 1px solid #334155;
+  padding: 0.8rem 1rem calc(1rem + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.day-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.day-panel-head h2 {
+  font-size: 1.05rem;
+}
+
+.day-entry {
+  background: var(--panel);
+  border-radius: 0.8rem;
+  padding: 0.9rem 1rem;
+}
+
+.day-entry.done .name::after {
+  content: " ✓";
+  color: #4ade80;
+}
+
+.day-entry .name {
+  font-size: 1.1rem;
+  font-weight: 600;
+  display: block;
+}
+
+.day-entry .meta {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.day-entry .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+}
+
+.move-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+  align-items: center;
+}
+
+.move-row input[type="date"] {
+  flex: 1;
+}
+
+.day-add {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.day-add .btn {
+  flex: 1;
+}
+
+.lib-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.empty.small {
+  padding: 0.6rem 0;
+  font-size: 0.9rem;
 }
 
 /* ---- run ---- */

@@ -1,15 +1,32 @@
-use crate::store::{Store, WorkoutSummary};
 use serde::Serialize;
 use std::sync::Mutex;
 use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager, State};
-use wltimer_core::engine::{Engine, Snapshot};
+use wltimer_core::days::{self, DayEntry, DayStatus, DayStore, DaySummary};
+use wltimer_core::engine::{Cue, Engine, Snapshot};
 use wltimer_core::model::{Phase, Workout};
 use wltimer_core::parser::{self, ParseError};
+use wltimer_core::plan::{Plan, PlanStore, PlanSummary};
+use wltimer_core::store::{Store, WorkoutSummary};
+
+/// Where the currently running workout came from — decides how a finished run
+/// is recorded on the calendar.
+pub enum RunOrigin {
+    None,
+    /// A scheduled calendar entry: flip it to done.
+    Day { date: String, index: usize },
+    /// A library template: append a done entry to the start date.
+    Library { date: String, slug: String },
+    /// An unsaved builder run: append a done entry to the start date.
+    Adhoc { date: String },
+}
 
 pub struct AppState {
     pub engine: Mutex<Engine>,
     pub store: Store,
+    pub days: DayStore,
+    pub plans: PlanStore,
+    pub origin: Mutex<RunOrigin>,
 }
 
 /// Everything the run screen needs up front; ticks then only carry indices.
@@ -42,6 +59,52 @@ pub enum Preview {
     },
 }
 
+/// Result of parsing a full document for the builder screen.
+#[derive(Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum ParseFull {
+    Ok { workout: Workout },
+    Err { errors: Vec<ParseError> },
+}
+
+#[derive(Serialize)]
+pub struct DayEntryInfo {
+    pub name: String,
+    pub status: DayStatus,
+    pub completed_at: Option<String>,
+    pub source_slug: Option<String>,
+    pub source_plan: Option<String>,
+    pub markdown: String,
+}
+
+fn local_date() -> String {
+    chrono::Local::now().format("%Y-%m-%d").to_string()
+}
+
+/// Use the frontend-supplied date when it is well-formed, else fall back to
+/// the device clock.
+fn date_or_local(date: &str) -> String {
+    if days::valid_date(date) {
+        date.to_string()
+    } else {
+        local_date()
+    }
+}
+
+fn check_date(date: &str) -> Result<(), String> {
+    if days::valid_date(date) {
+        Ok(())
+    } else {
+        Err(format!("invalid date '{date}' — expected YYYY-MM-DD"))
+    }
+}
+
+fn date_errors(date: &str) -> Result<(), Vec<ParseError>> {
+    check_date(date).map_err(|message| vec![ParseError { line: 1, message }])
+}
+
+// ---- library ----
+
 #[tauri::command]
 pub fn list_workouts(state: State<AppState>) -> Vec<WorkoutSummary> {
     state.store.list()
@@ -66,6 +129,8 @@ pub fn delete_workout(state: State<AppState>, slug: String) -> Result<(), String
     state.store.delete(&slug)
 }
 
+// ---- parsing / serialization ----
+
 #[tauri::command]
 pub fn parse_preview(source: String) -> Preview {
     match parser::parse_workout(&source) {
@@ -78,15 +143,6 @@ pub fn parse_preview(source: String) -> Preview {
     }
 }
 
-/// Result of parsing a full document for the builder screen.
-#[derive(Serialize)]
-#[serde(tag = "status", rename_all = "snake_case")]
-pub enum ParseFull {
-    Ok { workout: Workout },
-    Err { errors: Vec<ParseError> },
-}
-
-/// Parse markdown into the full workout structure (populates the builder UI).
 #[tauri::command]
 pub fn parse_full(source: String) -> ParseFull {
     match parser::parse_workout(&source) {
@@ -95,18 +151,238 @@ pub fn parse_full(source: String) -> ParseFull {
     }
 }
 
-/// Serialize a builder-built workout to its canonical markdown form.
 #[tauri::command]
 pub fn serialize_workout(workout: Workout) -> String {
     parser::workout_to_markdown(&workout)
 }
 
-/// Start a workout built directly in the UI, without saving it first.
+// ---- calendar ----
+
+#[tauri::command]
+pub fn get_month(state: State<AppState>, year: i32, month: u32) -> Vec<DaySummary> {
+    state.days.month(year, month)
+}
+
+#[tauri::command]
+pub fn get_day(state: State<AppState>, date: String) -> Result<Vec<DayEntryInfo>, String> {
+    check_date(&date)?;
+    Ok(state
+        .days
+        .load(&date)
+        .iter()
+        .map(|e| DayEntryInfo {
+            name: days::entry_name(e),
+            status: e.status,
+            completed_at: e.completed_at.clone(),
+            source_slug: e.source_slug.clone(),
+            source_plan: e.source_plan.clone(),
+            markdown: e.markdown.clone(),
+        })
+        .collect())
+}
+
+fn planned_entry(markdown: String, source_slug: Option<String>) -> DayEntry {
+    DayEntry {
+        markdown,
+        status: DayStatus::Planned,
+        completed_at: None,
+        source_slug,
+        source_plan: None,
+    }
+}
+
+#[tauri::command]
+pub fn add_day_entry(
+    state: State<AppState>,
+    date: String,
+    source: String,
+) -> Result<usize, Vec<ParseError>> {
+    date_errors(&date)?;
+    parser::parse_workout(&source)?;
+    state
+        .days
+        .add(&date, planned_entry(source, None))
+        .map_err(|message| vec![ParseError { line: 1, message }])
+}
+
+#[tauri::command]
+pub fn add_day_from_library(
+    state: State<AppState>,
+    date: String,
+    slug: String,
+) -> Result<usize, String> {
+    check_date(&date)?;
+    let source = state.store.read_source(&slug)?;
+    state.days.add(&date, planned_entry(source, Some(slug)))
+}
+
+#[tauri::command]
+pub fn update_day_entry(
+    state: State<AppState>,
+    date: String,
+    index: usize,
+    source: String,
+) -> Result<(), Vec<ParseError>> {
+    date_errors(&date)?;
+    parser::parse_workout(&source)?;
+    state
+        .days
+        .update(&date, index, |e| e.markdown = source)
+        .map_err(|message| vec![ParseError { line: 1, message }])
+}
+
+#[tauri::command]
+pub fn delete_day_entry(state: State<AppState>, date: String, index: usize) -> Result<(), String> {
+    check_date(&date)?;
+    state.days.delete(&date, index)
+}
+
+#[tauri::command]
+pub fn move_day_entry(
+    state: State<AppState>,
+    from_date: String,
+    index: usize,
+    to_date: String,
+) -> Result<(), String> {
+    check_date(&from_date)?;
+    check_date(&to_date)?;
+    state.days.move_entry(&from_date, index, &to_date)
+}
+
+/// Save a day entry's workout into the library (explicit opt-in).
+#[tauri::command]
+pub fn promote_day_entry(
+    state: State<AppState>,
+    date: String,
+    index: usize,
+) -> Result<WorkoutSummary, Vec<ParseError>> {
+    date_errors(&date)?;
+    let entries = state.days.load(&date);
+    let entry = entries
+        .get(index)
+        .ok_or_else(|| vec![ParseError { line: 1, message: format!("no entry {index} on {date}") }])?;
+    state.store.save(&entry.markdown, None)
+}
+
+// ---- training plans ----
+
+/// Replace all still-planned entries of this plan on dates >= `from` with the
+/// plan's current content. Done entries and past dates are never touched.
+/// Returns the number of days scheduled.
+fn sync_upcoming(state: &AppState, slug: &str, plan: &Plan, from: &str) -> usize {
+    for date in state.days.dates_from(from) {
+        let entries = state.days.load(&date);
+        let kept: Vec<DayEntry> = entries
+            .iter()
+            .filter(|e| !(e.status == DayStatus::Planned && e.source_plan.as_deref() == Some(slug)))
+            .cloned()
+            .collect();
+        if kept.len() != entries.len() {
+            let _ = state.days.save(&date, &kept);
+        }
+    }
+    let mut scheduled = 0;
+    for day in &plan.days {
+        if day.date.as_str() >= from {
+            let entry = DayEntry {
+                markdown: day.workout_md.clone(),
+                status: DayStatus::Planned,
+                completed_at: None,
+                source_slug: None,
+                source_plan: Some(slug.to_string()),
+            };
+            if state.days.add(&day.date, entry).is_ok() {
+                scheduled += 1;
+            }
+        }
+    }
+    scheduled
+}
+
+#[derive(Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum PlanPreview {
+    Ok { name: String, day_count: usize },
+    Err { errors: Vec<ParseError> },
+}
+
+/// Check whether a document is a training plan (used to route uploads:
+/// plan files import as plans regardless of which upload button was used).
+#[tauri::command]
+pub fn parse_plan_preview(source: String) -> PlanPreview {
+    match wltimer_core::plan::parse_plan(&source) {
+        Ok(p) => PlanPreview::Ok {
+            name: p.name,
+            day_count: p.days.len(),
+        },
+        Err(errors) => PlanPreview::Err { errors },
+    }
+}
+
+#[tauri::command]
+pub fn list_plans(state: State<AppState>) -> Vec<PlanSummary> {
+    state.plans.list()
+}
+
+#[tauri::command]
+pub fn get_plan_source(state: State<AppState>, slug: String) -> Result<String, String> {
+    state.plans.read_source(&slug)
+}
+
+/// Save (or replace) a plan and immediately sync its upcoming days onto the
+/// calendar.
+#[tauri::command]
+pub fn save_plan(
+    state: State<AppState>,
+    source: String,
+    prev_slug: Option<String>,
+    today: String,
+) -> Result<PlanSummary, Vec<ParseError>> {
+    let (summary, plan) = state.plans.save(&source, prev_slug.as_deref())?;
+    sync_upcoming(&state, &summary.slug, &plan, &date_or_local(&today));
+    Ok(summary)
+}
+
+/// Re-apply a stored plan's upcoming days to the calendar; returns how many
+/// days were scheduled.
+#[tauri::command]
+pub fn sync_plan(state: State<AppState>, slug: String, today: String) -> Result<usize, String> {
+    let source = state.plans.read_source(&slug)?;
+    let plan = wltimer_core::plan::parse_plan(&source)
+        .map_err(|e| format!("plan no longer parses — line {}: {}", e[0].line, e[0].message))?;
+    Ok(sync_upcoming(&state, &slug, &plan, &date_or_local(&today)))
+}
+
+#[tauri::command]
+pub fn delete_plan(state: State<AppState>, slug: String) -> Result<(), String> {
+    state.plans.delete(&slug)
+}
+
+// ---- starting runs ----
+
+#[tauri::command]
+pub fn start_workout(
+    app: AppHandle,
+    state: State<AppState>,
+    slug: String,
+    today: String,
+) -> Result<RunPlan, String> {
+    let source = state.store.read_source(&slug)?;
+    let workout = parser::parse_workout(&source)
+        .map_err(|e| format!("workout no longer parses — line {}: {}", e[0].line, e[0].message))?;
+    *state.origin.lock().unwrap() = RunOrigin::Library {
+        date: date_or_local(&today),
+        slug,
+    };
+    start(app, state, workout)
+}
+
 #[tauri::command]
 pub fn start_custom(
     app: AppHandle,
     state: State<AppState>,
     workout: Workout,
+    today: String,
 ) -> Result<RunPlan, String> {
     if workout.blocks.is_empty() {
         return Err("add at least one part".into());
@@ -119,14 +395,27 @@ pub fn start_custom(
             return Err(format!("part {}: work time must be at least 1 second", i + 1));
         }
     }
+    *state.origin.lock().unwrap() = RunOrigin::Adhoc {
+        date: date_or_local(&today),
+    };
     start(app, state, workout)
 }
 
 #[tauri::command]
-pub fn start_workout(app: AppHandle, state: State<AppState>, slug: String) -> Result<RunPlan, String> {
-    let source = state.store.read_source(&slug)?;
-    let workout = parser::parse_workout(&source)
+pub fn start_day_entry(
+    app: AppHandle,
+    state: State<AppState>,
+    date: String,
+    index: usize,
+) -> Result<RunPlan, String> {
+    check_date(&date)?;
+    let entries = state.days.load(&date);
+    let entry = entries
+        .get(index)
+        .ok_or_else(|| format!("no entry {index} on {date}"))?;
+    let workout = parser::parse_workout(&entry.markdown)
         .map_err(|e| format!("workout no longer parses — line {}: {}", e[0].line, e[0].message))?;
+    *state.origin.lock().unwrap() = RunOrigin::Day { date, index };
     start(app, state, workout)
 }
 
@@ -153,6 +442,8 @@ fn start(app: AppHandle, state: State<AppState>, workout: Workout) -> Result<Run
     Ok(plan)
 }
 
+// ---- run control ----
+
 #[tauri::command]
 pub fn pause_timer(app: AppHandle, state: State<AppState>) {
     let now = Instant::now();
@@ -173,6 +464,7 @@ pub fn resume_timer(app: AppHandle, state: State<AppState>) {
 pub fn stop_timer(app: AppHandle, state: State<AppState>) {
     let mut engine = state.engine.lock().unwrap();
     engine.stop();
+    *state.origin.lock().unwrap() = RunOrigin::None;
     emit(&app, &engine.snapshot(Instant::now()), &[]);
 }
 
@@ -181,6 +473,7 @@ pub fn skip_phase(app: AppHandle, state: State<AppState>) {
     let now = Instant::now();
     let mut engine = state.engine.lock().unwrap();
     let cues = engine.skip(now);
+    maybe_record(&state, &engine, &cues);
     emit(&app, &engine.snapshot(now), &cues);
 }
 
@@ -189,10 +482,54 @@ pub fn get_snapshot(state: State<AppState>) -> Snapshot {
     state.engine.lock().unwrap().snapshot(Instant::now())
 }
 
-fn emit(app: &AppHandle, snapshot: &Snapshot, cues: &[wltimer_core::engine::Cue]) {
+// ---- events + completion recording ----
+
+fn emit(app: &AppHandle, snapshot: &Snapshot, cues: &[Cue]) {
     let _ = app.emit("timer:tick", snapshot);
     for cue in cues {
         let _ = app.emit("timer:cue", cue);
+    }
+}
+
+/// When a run just finished, record it on the calendar according to its origin.
+fn maybe_record(state: &AppState, engine: &Engine, cues: &[Cue]) {
+    if !cues.iter().any(|c| matches!(c, Cue::Finished)) {
+        return;
+    }
+    let Some(workout) = engine.workout() else {
+        return;
+    };
+    let markdown = parser::workout_to_markdown(workout);
+    let origin = std::mem::replace(&mut *state.origin.lock().unwrap(), RunOrigin::None);
+    let now = chrono::Local::now().to_rfc3339();
+    let done = |markdown: String, source_slug: Option<String>| DayEntry {
+        markdown,
+        status: DayStatus::Done,
+        completed_at: Some(now.clone()),
+        source_slug,
+        source_plan: None,
+    };
+    match origin {
+        RunOrigin::Day { date, index } => {
+            let updated = state
+                .days
+                .update(&date, index, |e| {
+                    e.status = DayStatus::Done;
+                    e.completed_at = Some(now.clone());
+                })
+                .is_ok();
+            if !updated {
+                // The scheduled entry vanished mid-run; still record the work.
+                let _ = state.days.add(&date, done(markdown, None));
+            }
+        }
+        RunOrigin::Library { date, slug } => {
+            let _ = state.days.add(&date, done(markdown, Some(slug)));
+        }
+        RunOrigin::Adhoc { date } => {
+            let _ = state.days.add(&date, done(markdown, None));
+        }
+        RunOrigin::None => {}
     }
 }
 
@@ -210,6 +547,7 @@ pub fn spawn_ticker(app: AppHandle) {
                 match engine.state() {
                     wltimer_core::engine::State::Running => {
                         let cues = engine.advance(now);
+                        maybe_record(&state, &engine, &cues);
                         (Some(engine.snapshot(now)), cues)
                     }
                     wltimer_core::engine::State::Paused => (Some(engine.snapshot(now)), Vec::new()),

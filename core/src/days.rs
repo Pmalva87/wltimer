@@ -1,0 +1,257 @@
+//! Calendar storage: one zstd-compressed JSON file per date, holding the list
+//! of workouts planned or done that day. Every entry embeds its own complete
+//! markdown copy, so the same workout can live on many days independently.
+
+use crate::parser;
+use crate::zio;
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::PathBuf;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DayStatus {
+    Planned,
+    Done,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DayEntry {
+    pub markdown: String,
+    pub status: DayStatus,
+    pub completed_at: Option<String>,
+    /// Library template this entry was copied from, if any (informational).
+    pub source_slug: Option<String>,
+    /// Training plan this entry was scheduled by, if any. Plan syncs replace
+    /// still-planned future entries carrying their slug.
+    #[serde(default)]
+    pub source_plan: Option<String>,
+}
+
+/// Lightweight per-entry info for calendar rendering.
+#[derive(Debug, Clone, Serialize)]
+pub struct DayEntrySummary {
+    pub name: String,
+    pub status: DayStatus,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DaySummary {
+    pub date: String,
+    pub entries: Vec<DayEntrySummary>,
+}
+
+pub fn valid_date(date: &str) -> bool {
+    let b = date.as_bytes();
+    b.len() == 10
+        && b[4] == b'-'
+        && b[7] == b'-'
+        && [0, 1, 2, 3, 5, 6, 8, 9].iter().all(|&i| b[i].is_ascii_digit())
+}
+
+pub fn entry_name(entry: &DayEntry) -> String {
+    parser::parse_workout(&entry.markdown)
+        .map(|w| w.name)
+        .unwrap_or_else(|_| "Workout".into())
+}
+
+pub struct DayStore {
+    dir: PathBuf,
+}
+
+impl DayStore {
+    pub fn new(dir: PathBuf) -> std::io::Result<Self> {
+        fs::create_dir_all(&dir)?;
+        Ok(DayStore { dir })
+    }
+
+    fn path(&self, date: &str) -> PathBuf {
+        self.dir.join(format!("{date}.json.zst"))
+    }
+
+    pub fn load(&self, date: &str) -> Vec<DayEntry> {
+        zio::read_text(&self.path(date))
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn save(&self, date: &str, entries: &[DayEntry]) -> Result<(), String> {
+        if entries.is_empty() {
+            let _ = fs::remove_file(self.path(date));
+            return Ok(());
+        }
+        let json = serde_json::to_string(entries).map_err(|e| e.to_string())?;
+        zio::write_compressed(&self.path(date), json.as_bytes())
+            .map_err(|e| format!("cannot save day '{date}': {e}"))
+    }
+
+    /// Append an entry; returns its index within the day.
+    pub fn add(&self, date: &str, entry: DayEntry) -> Result<usize, String> {
+        let mut entries = self.load(date);
+        entries.push(entry);
+        self.save(date, &entries)?;
+        Ok(entries.len() - 1)
+    }
+
+    pub fn update<F>(&self, date: &str, index: usize, f: F) -> Result<(), String>
+    where
+        F: FnOnce(&mut DayEntry),
+    {
+        let mut entries = self.load(date);
+        let entry = entries
+            .get_mut(index)
+            .ok_or_else(|| format!("no entry {index} on {date}"))?;
+        f(entry);
+        self.save(date, &entries)
+    }
+
+    pub fn delete(&self, date: &str, index: usize) -> Result<(), String> {
+        let mut entries = self.load(date);
+        if index >= entries.len() {
+            return Err(format!("no entry {index} on {date}"));
+        }
+        entries.remove(index);
+        self.save(date, &entries)
+    }
+
+    /// Move an entry (with its status/metadata) from one date to another.
+    pub fn move_entry(&self, from_date: &str, index: usize, to_date: &str) -> Result<(), String> {
+        let mut from = self.load(from_date);
+        if index >= from.len() {
+            return Err(format!("no entry {index} on {from_date}"));
+        }
+        let entry = from.remove(index);
+        let mut to = self.load(to_date);
+        to.push(entry);
+        // Write destination first so a failure can't lose the entry.
+        self.save(to_date, &to)?;
+        self.save(from_date, &from)
+    }
+
+    /// All stored dates on or after `from`, ascending.
+    pub fn dates_from(&self, from: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let Ok(entries) = fs::read_dir(&self.dir) else {
+            return out;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_str().unwrap_or("");
+            if let Some(date) = name.strip_suffix(".json.zst") {
+                if valid_date(date) && date >= from {
+                    out.push(date.to_string());
+                }
+            }
+        }
+        out.sort();
+        out
+    }
+
+    /// Summaries for every stored date in the given month.
+    pub fn month(&self, year: i32, month: u32) -> Vec<DaySummary> {
+        let prefix = format!("{year:04}-{month:02}-");
+        let mut out = Vec::new();
+        let Ok(entries) = fs::read_dir(&self.dir) else {
+            return out;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_str().unwrap_or("");
+            let Some(date) = name.strip_suffix(".json.zst") else {
+                continue;
+            };
+            if !date.starts_with(&prefix) || !valid_date(date) {
+                continue;
+            }
+            let summaries = self
+                .load(date)
+                .iter()
+                .map(|e| DayEntrySummary {
+                    name: entry_name(e),
+                    status: e.status,
+                })
+                .collect();
+            out.push(DaySummary {
+                date: date.to_string(),
+                entries: summaries,
+            });
+        }
+        out.sort_by(|a, b| a.date.cmp(&b.date));
+        out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(md: &str) -> DayEntry {
+        DayEntry {
+            markdown: md.into(),
+            status: DayStatus::Planned,
+            completed_at: None,
+            source_slug: None,
+            source_plan: None,
+        }
+    }
+
+    fn temp_store(tag: &str) -> DayStore {
+        let dir = std::env::temp_dir().join(format!("wltimer-days-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        DayStore::new(dir).unwrap()
+    }
+
+    const MD: &str = "# Squats\n\n## A\n- work: 30\n";
+
+    #[test]
+    fn add_load_update_delete() {
+        let s = temp_store("crud");
+        assert_eq!(s.add("2026-07-28", entry(MD)).unwrap(), 0);
+        assert_eq!(s.add("2026-07-28", entry(MD)).unwrap(), 1);
+        assert_eq!(s.load("2026-07-28").len(), 2);
+        s.update("2026-07-28", 1, |e| {
+            e.status = DayStatus::Done;
+            e.completed_at = Some("2026-07-28T18:00:00Z".into());
+        })
+        .unwrap();
+        assert_eq!(s.load("2026-07-28")[1].status, DayStatus::Done);
+        s.delete("2026-07-28", 0).unwrap();
+        assert_eq!(s.load("2026-07-28").len(), 1);
+        // Deleting the last entry removes the file entirely.
+        s.delete("2026-07-28", 0).unwrap();
+        assert!(s.load("2026-07-28").is_empty());
+        assert!(!s.path("2026-07-28").exists());
+    }
+
+    #[test]
+    fn move_between_days() {
+        let s = temp_store("move");
+        s.add("2026-07-28", entry(MD)).unwrap();
+        s.move_entry("2026-07-28", 0, "2026-07-30").unwrap();
+        assert!(s.load("2026-07-28").is_empty());
+        let moved = s.load("2026-07-30");
+        assert_eq!(moved.len(), 1);
+        assert_eq!(moved[0].markdown, MD);
+    }
+
+    #[test]
+    fn month_summaries() {
+        let s = temp_store("month");
+        s.add("2026-07-28", entry(MD)).unwrap();
+        s.add("2026-07-02", entry(MD)).unwrap();
+        s.add("2026-08-01", entry(MD)).unwrap();
+        let july = s.month(2026, 7);
+        assert_eq!(july.len(), 2);
+        assert_eq!(july[0].date, "2026-07-02");
+        assert_eq!(july[1].entries[0].name, "Squats");
+    }
+
+    #[test]
+    fn validates_dates() {
+        assert!(valid_date("2026-07-28"));
+        assert!(!valid_date("2026-7-28"));
+        assert!(!valid_date("not-a-date!"));
+        assert!(!valid_date("2026-07-28x"));
+    }
+}

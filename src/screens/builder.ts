@@ -7,12 +7,12 @@ import {
   type ParseError,
   type Workout,
 } from "../api";
-import { copyText } from "../clipboard";
+import { saveMarkdownFile } from "../files";
+import { FORMAT_GUIDE } from "../format";
+import { tabBar } from "../tabs";
 import { esc } from "./library";
 
-const DRAFT_KEY = "wltimer.draft";
 const RUN_DRAFT_KEY = "wltimer.rundraft";
-const OLD_QUICK_KEY = "wltimer.quick";
 
 function defaultBlock(): Block {
   return {
@@ -24,34 +24,6 @@ function defaultBlock(): Block {
     rest_after_secs: 60,
     color: null,
   };
-}
-
-function loadDraft(): Workout {
-  try {
-    const raw = JSON.parse(localStorage.getItem(DRAFT_KEY) ?? "null");
-    if (raw && Array.isArray(raw.blocks) && raw.blocks.length > 0) {
-      return raw as Workout;
-    }
-    // Migrate the retired quick-timer settings into a draft.
-    const quick = JSON.parse(localStorage.getItem(OLD_QUICK_KEY) ?? "null");
-    if (quick && Array.isArray(quick.parts) && quick.parts.length > 0) {
-      return {
-        name: "",
-        blocks: quick.parts.map(
-          (p: { intervals?: number; workSecs?: number; restSecs?: number; restAfterSecs?: number }) => ({
-            ...defaultBlock(),
-            intervals: p.intervals ?? 5,
-            work_secs: p.workSecs ?? 60,
-            rest_secs: p.restSecs ?? 0,
-            rest_after_secs: p.restAfterSecs ?? 60,
-          }),
-        ),
-      };
-    }
-  } catch {
-    // fall through
-  }
-  return { name: "", blocks: [defaultBlock()] };
 }
 
 export function loadRunDraft(): Workout | null {
@@ -66,33 +38,51 @@ export function loadRunDraft(): Workout | null {
   return null;
 }
 
-export async function renderBuilder(root: HTMLElement, slug: string | null) {
-  let w: Workout;
-  let mode: "form" | "md" = "form";
-  let mdText = "";
-  let initialErrors: ParseError[] = [];
+/**
+ * `slug` targets: null = quick tab, `<slug>` = edit library workout,
+ * `@<date>` = new calendar entry, `@<date>:<index>` = edit entry.
+ * `asTab` renders the bottom tab bar instead of a back button.
+ * Markdown is import/export only — all editing happens in the form.
+ */
+export async function renderBuilder(root: HTMLElement, slug: string | null, asTab = false) {
+  const dayMatch = slug?.match(/^@(\d{4}-\d{2}-\d{2})(?::(\d+))?$/) ?? null;
+  const dayDate = dayMatch?.[1] ?? null;
+  let dayIndex = dayMatch?.[2] != null ? Number(dayMatch[2]) : null;
+  const backHash = dayDate ? `#/calendar/${dayDate}` : "#/library";
+
+  let w: Workout = { name: "", blocks: [defaultBlock()] };
+  let loadErrors: ParseError[] = [];
   const openNotes = new Set<number>();
 
-  if (slug) {
-    const source = await api.getSource(slug);
+  async function loadFromSource(source: string) {
     const parsed = await api.parseFull(source);
     if (parsed.status === "ok") {
       w = parsed.workout;
     } else {
-      // Stored file no longer parses (edited externally) — open as markdown.
-      w = { name: slug, blocks: [] };
-      mode = "md";
-      mdText = source;
-      initialErrors = parsed.errors;
+      loadErrors = parsed.errors;
     }
-  } else {
-    w = loadDraft();
   }
 
-  function persist() {
-    if (!slug) {
-      localStorage.setItem(DRAFT_KEY, JSON.stringify(w));
+  if (dayDate && dayIndex != null) {
+    const entry = (await api.getDay(dayDate).catch(() => []))[dayIndex];
+    if (entry) {
+      await loadFromSource(entry.markdown);
+    } else {
+      dayIndex = null;
     }
+  } else if (slug && !dayDate) {
+    w.name = slug;
+    await loadFromSource(await api.getSource(slug));
+  }
+
+  /** Save the current state as a calendar entry; returns its index. */
+  async function saveDayEntry(source: string): Promise<number> {
+    if (dayIndex != null) {
+      await api.updateDayEntry(dayDate!, dayIndex, source);
+      return dayIndex;
+    }
+    dayIndex = await api.addDayEntry(dayDate!, source);
+    return dayIndex;
   }
 
   function showErrors(errors: ParseError[]) {
@@ -111,45 +101,56 @@ export async function renderBuilder(root: HTMLElement, slug: string | null) {
     status.textContent = msg;
   }
 
+  /**
+   * Copy of the workout ready to run/serialize: empty names get defaults and
+   * "rest after" is dropped from the last part (nothing follows it).
+   */
+  function withDefaults(): Workout {
+    const last = w.blocks.length - 1;
+    return {
+      name: w.name.trim() || (dayDate ? "Workout" : "Quick Timer"),
+      blocks: w.blocks.map((b, i) => ({
+        ...b,
+        name: b.name.trim() || `Part ${i + 1}`,
+        rest_secs: b.rest_secs || null,
+        rest_after_secs: i < last ? b.rest_after_secs || null : null,
+      })),
+    };
+  }
+
   async function save() {
-    let source: string;
-    if (mode === "md") {
-      source = mdText;
-    } else {
-      if (!w.name.trim()) {
-        showMessage("give the workout a name to save it", false);
-        root.querySelector<HTMLInputElement>("#wname")?.focus();
-        return;
-      }
-      source = await api.serializeWorkout(withDefaults());
+    if (!dayDate && !w.name.trim()) {
+      showMessage("give the workout a name to save it", false);
+      root.querySelector<HTMLInputElement>("#wname")?.focus();
+      return;
     }
     try {
-      await api.saveWorkout(source, slug);
-      if (!slug) {
-        localStorage.removeItem(DRAFT_KEY);
+      const source = await api.serializeWorkout(withDefaults());
+      if (dayDate) {
+        await saveDayEntry(source);
+      } else {
+        await api.saveWorkout(source, slug);
       }
-      location.hash = "#/";
+      location.hash = backHash;
     } catch (e) {
       showErrors(e as ParseError[]);
     }
   }
 
-  /** Copy of the workout with empty names replaced so it can run/serialize. */
-  function withDefaults(): Workout {
-    return {
-      name: w.name.trim() || "Quick Timer",
-      blocks: w.blocks.map((b, i) => ({
-        ...b,
-        name: b.name.trim() || `Part ${i + 1}`,
-        rest_secs: b.rest_secs || null,
-        rest_after_secs: b.rest_after_secs || null,
-      })),
-    };
-  }
-
-  function startNow() {
+  async function startNow() {
     if (w.blocks.length === 0) {
       showMessage("add at least one part", false);
+      return;
+    }
+    if (dayDate) {
+      // Save (or update) the calendar entry first, then run it, so finishing
+      // marks that entry done instead of recording a duplicate.
+      try {
+        const idx = await saveDayEntry(await api.serializeWorkout(withDefaults()));
+        location.hash = `#/run/@${dayDate}:${idx}`;
+      } catch (e) {
+        showErrors(e as ParseError[]);
+      }
       return;
     }
     localStorage.setItem(RUN_DRAFT_KEY, JSON.stringify(withDefaults()));
@@ -170,8 +171,8 @@ export async function renderBuilder(root: HTMLElement, slug: string | null) {
     root.innerHTML = `
       <div class="screen builder">
         <header class="topbar">
-          <a class="btn" href="#/">‹ Back</a>
-          <h1>${slug ? "Edit" : "New"} workout</h1>
+          ${asTab ? "" : `<a class="btn" href="${backHash}">‹ Back</a>`}
+          <h1>${dayDate ? `Workout · ${dayDate}` : asTab ? "Quick workout" : "Edit workout"}</h1>
           <button class="btn primary" id="save">Save</button>
         </header>
         <div class="quick-form">
@@ -217,31 +218,30 @@ export async function renderBuilder(root: HTMLElement, slug: string | null) {
           <button class="btn" id="addpart">+ Add part</button>
           <div class="builder-tools">
             <button class="btn" id="upload">📂 Upload .md</button>
-            <button class="btn" id="mdtoggle">‹/› Markdown</button>
+            <button class="btn" id="exportmd">⇩ Export .md</button>
+            <button class="btn" id="formatspec">📄 Format .md</button>
           </div>
           <div id="status" class="editor-status"></div>
           <div class="quick-total">total ${fmtDuration(workoutTotalSecs(w))} (incl. ${PREPARE_SECS}s get-ready)</div>
           <button class="btn start" id="go">START</button>
         </div>
         <input type="file" id="file" accept=".md,.markdown,.txt" hidden>
+        ${asTab ? tabBar("quick") : ""}
       </div>`;
 
     root.querySelector<HTMLInputElement>("#wname")!.addEventListener("input", (e) => {
       w.name = (e.target as HTMLInputElement).value;
-      persist();
     });
 
     root.querySelectorAll<HTMLInputElement>("input.part-name").forEach((inp) => {
       inp.addEventListener("input", () => {
         w.blocks[Number(inp.dataset.part)].name = inp.value;
-        persist();
       });
     });
 
     root.querySelectorAll<HTMLTextAreaElement>("textarea.notes-text").forEach((ta) => {
       ta.addEventListener("input", () => {
         w.blocks[Number(ta.dataset.part)].description_md = ta.value;
-        persist();
       });
     });
 
@@ -268,7 +268,6 @@ export async function renderBuilder(root: HTMLElement, slug: string | null) {
           const delta = step * (btn.classList.contains("plus") ? 1 : -1);
           const min = field === "intervals" ? 1 : field === "work_secs" ? 15 : 0;
           b[field] = Math.max(min, (b[field] ?? 0) + delta);
-          persist();
           renderForm();
         });
       });
@@ -277,7 +276,6 @@ export async function renderBuilder(root: HTMLElement, slug: string | null) {
     root.querySelectorAll<HTMLButtonElement>("button.remove").forEach((btn) => {
       btn.addEventListener("click", () => {
         w.blocks.splice(Number(btn.dataset.part), 1);
-        persist();
         renderForm();
       });
     });
@@ -285,7 +283,6 @@ export async function renderBuilder(root: HTMLElement, slug: string | null) {
     root.querySelector("#addpart")!.addEventListener("click", () => {
       const last = w.blocks[w.blocks.length - 1];
       w.blocks.push(last ? { ...last, name: "", description_md: "" } : defaultBlock());
-      persist();
       renderForm();
     });
 
@@ -294,96 +291,56 @@ export async function renderBuilder(root: HTMLElement, slug: string | null) {
     fileInput.addEventListener("change", async () => {
       const file = fileInput.files?.[0];
       if (!file) return;
-      const source = await file.text();
-      const parsed = await api.parseFull(source);
+      const text = await file.text();
+      // Plan files (dated ## headings) import as plans, which live on the
+      // Workouts tab — not into this form.
+      const planCheck = await api.parsePlanPreview(text);
+      if (planCheck.status === "ok") {
+        try {
+          await api.savePlan(text, null);
+          location.hash = "#/library";
+        } catch (e) {
+          showErrors(e as ParseError[]);
+        }
+        return;
+      }
+      const parsed = await api.parseFull(text);
       if (parsed.status === "ok") {
         w = parsed.workout;
         openNotes.clear();
-        persist();
         renderForm();
         showMessage(`✓ imported "${parsed.workout.name}"`);
-      } else {
-        // Let the user fix the file's problems in the markdown view.
-        mdText = source;
-        mode = "md";
-        renderMd(parsed.errors);
-      }
-    });
-
-    root.querySelector("#mdtoggle")!.addEventListener("click", async () => {
-      mdText = await api.serializeWorkout(withDefaults());
-      mode = "md";
-      renderMd();
-    });
-
-    root.querySelector("#save")!.addEventListener("click", () => void save());
-    root.querySelector("#go")!.addEventListener("click", startNow);
-  }
-
-  function renderMd(errors: ParseError[] = []) {
-    root.innerHTML = `
-      <div class="screen editor">
-        <header class="topbar">
-          <a class="btn" href="#/">‹ Back</a>
-          <h1>Markdown</h1>
-          <button class="btn primary" id="save">Save</button>
-        </header>
-        <textarea id="src" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea>
-        <div id="status" class="editor-status"></div>
-        <div class="builder-tools md-tools">
-          <button class="btn" id="formview">‹/› Form view</button>
-          <button class="btn" id="copy">⧉ Copy</button>
-        </div>
-      </div>`;
-
-    const textarea = root.querySelector<HTMLTextAreaElement>("#src")!;
-    textarea.value = mdText;
-
-    let debounce: ReturnType<typeof setTimeout> | undefined;
-    async function validate() {
-      const preview = await api.parsePreview(mdText);
-      if (preview.status === "ok") {
-        showMessage(
-          `✓ ${preview.name} — ${preview.block_count} part${preview.block_count === 1 ? "" : "s"}, ${fmtDuration(preview.total_secs)}`,
-        );
-      } else {
-        showErrors(preview.errors);
-      }
-    }
-    textarea.addEventListener("input", () => {
-      mdText = textarea.value;
-      clearTimeout(debounce);
-      debounce = setTimeout(() => void validate(), 300);
-    });
-    if (errors.length > 0) {
-      showErrors(errors);
-    } else {
-      void validate();
-    }
-
-    root.querySelector("#formview")!.addEventListener("click", async () => {
-      const parsed = await api.parseFull(mdText);
-      if (parsed.status === "ok") {
-        w = parsed.workout;
-        openNotes.clear();
-        mode = "form";
-        persist();
-        renderForm();
       } else {
         showErrors(parsed.errors);
       }
     });
 
-    root.querySelector("#copy")!.addEventListener("click", async () => {
-      showMessage((await copyText(mdText)) ? "✓ copied to clipboard" : "copy failed", true);
+    root.querySelector("#exportmd")!.addEventListener("click", async () => {
+      const workout = withDefaults();
+      const source = await api.serializeWorkout(workout);
+      saveMarkdownFile(
+        `${workout.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.md`,
+        source,
+      );
+      showMessage("✓ exported as .md file");
+    });
+
+    root.querySelector("#formatspec")!.addEventListener("click", () => {
+      saveMarkdownFile("wltimer-format.md", FORMAT_GUIDE);
+      showMessage("✓ format guide exported — give it to Claude to write workouts");
     });
 
     root.querySelector("#save")!.addEventListener("click", () => void save());
+    root.querySelector("#go")!.addEventListener("click", () => void startNow());
   }
 
-  if (mode === "md") {
-    renderMd(initialErrors);
-  } else {
-    renderForm();
+  renderForm();
+  if (loadErrors.length > 0) {
+    showErrors(
+      loadErrors.concat({
+        line: 0,
+        message: "stored file could not be loaded into the form — fix it externally or delete it",
+      }),
+    );
   }
 }

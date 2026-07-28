@@ -2,6 +2,8 @@ import "./styles.css";
 import { renderLibrary } from "./screens/library";
 import { renderBuilder } from "./screens/builder";
 import { renderRun } from "./screens/run";
+import { renderCalendar } from "./screens/calendar";
+import { lastTab, rememberTab } from "./tabs";
 
 type Cleanup = (() => void) | void;
 
@@ -16,12 +18,22 @@ async function route() {
   const hash = location.hash || "#/";
   const [, screen, arg] = hash.split("/");
   const slug = arg ? decodeURIComponent(arg) : null;
-  if (screen === "edit") {
-    cleanup = await renderBuilder(app, slug);
+  if (screen === "quick" || (screen === "edit" && !slug)) {
+    rememberTab("#/quick");
+    cleanup = await renderBuilder(app, null, true);
+  } else if (screen === "edit") {
+    cleanup = await renderBuilder(app, slug, false);
+  } else if (screen === "library") {
+    rememberTab("#/library");
+    cleanup = await renderLibrary(app);
+  } else if (screen === "calendar") {
+    rememberTab("#/calendar");
+    cleanup = await renderCalendar(app, slug);
   } else if (screen === "run" && slug) {
     cleanup = await renderRun(app, slug);
   } else {
-    cleanup = await renderLibrary(app);
+    // "#/" and anything unknown: reopen the last-used tab (default: quick).
+    location.hash = lastTab();
   }
 }
 
