@@ -167,6 +167,16 @@ body {
   display: flex;
   gap: 0.5rem;
   margin-top: 0.7rem;
+  flex-wrap: wrap;
+}
+
+.workout .actions.compact {
+  gap: 0.35rem;
+}
+
+.workout .actions.compact .btn {
+  padding: 0.3rem 0.5rem;
+  font-size: 0.78rem;
 }
 
 .empty {
@@ -432,6 +442,12 @@ details.notes textarea {
 
 .day-panel-head h2 {
   font-size: 1.05rem;
+}
+
+.day-total {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin-top: -0.4rem;
 }
 
 .day-entry {

@@ -1,4 +1,4 @@
-import { api, todayStr, type DayEntryInfo, type ParseError } from "../api";
+import { api, fmtDuration, todayStr, type DayEntryInfo, type ParseError } from "../api";
 import { copyText } from "../clipboard";
 import { tabBar } from "../tabs";
 import { esc } from "./library";
@@ -36,16 +36,17 @@ export async function renderCalendar(root: HTMLElement, dateArg: string | null) 
     el.textContent = msg;
   }
 
-  function entryCard(e: DayEntryInfo, i: number): string {
+  function entryCard(e: DayEntryInfo, i: number, totalSecs: number | null): string {
     const done = e.status === "done";
     const when = e.completed_at
       ? ` · ${new Date(e.completed_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
       : "";
+    const duration = totalSecs != null ? ` · ${fmtDuration(totalSecs)}` : "";
     return `
       <div class="day-entry ${done ? "done" : ""}">
         <div class="info">
           <span class="name">${esc(e.name)}</span>
-          <span class="meta">${done ? `✓ done${when}` : "⧗ planned"}${e.source_slug ? ` · from library` : ""}${e.source_plan ? ` · plan: ${esc(e.source_plan)}` : ""}</span>
+          <span class="meta">${done ? `✓ done${when}` : "⧗ planned"}${duration}${e.source_slug ? ` · from library` : ""}${e.source_plan ? ` · plan: ${esc(e.source_plan)}` : ""}</span>
         </div>
         ${
           movingIdx === i
@@ -70,6 +71,16 @@ export async function renderCalendar(root: HTMLElement, dateArg: string | null) 
     const summaries = await api.getMonth(viewYear, viewMonth);
     const byDate = new Map(summaries.map((s) => [s.date, s.entries]));
     const entries: DayEntryInfo[] = await api.getDay(selected).catch(() => []);
+    const entryTotals = await Promise.all(
+      entries.map((e) =>
+        api.parsePreview(e.markdown).then((p) => (p.status === "ok" ? p.total_secs : null)),
+      ),
+    );
+    const plannedTotal = entries.reduce(
+      (sum, e, i) => (e.status === "planned" && entryTotals[i] != null ? sum + entryTotals[i]! : sum),
+      0,
+    );
+    const plannedCount = entries.filter((e) => e.status === "planned").length;
 
     const firstWeekday = (new Date(viewYear, viewMonth - 1, 1).getDay() + 6) % 7;
     const daysInMonth = new Date(viewYear, viewMonth, 0).getDate();
@@ -110,7 +121,12 @@ export async function renderCalendar(root: HTMLElement, dateArg: string | null) 
             <h2>${selLabel}</h2>
             <button class="btn" id="gotoday">Today</button>
           </div>
-          ${entries.length === 0 ? `<div class="empty small">Nothing on this day.</div>` : entries.map(entryCard).join("")}
+          ${plannedCount > 1 ? `<div class="day-total">Planned total: ${fmtDuration(plannedTotal)}</div>` : ""}
+          ${
+            entries.length === 0
+              ? `<div class="empty small">Nothing on this day.</div>`
+              : entries.map((e, i) => entryCard(e, i, entryTotals[i])).join("")
+          }
           <div id="daystatus" class="editor-status"></div>
           ${
             showLibraryPicker

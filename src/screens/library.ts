@@ -1,7 +1,7 @@
 import { api, fmtDuration, type ParseError } from "../api";
 import { copyText } from "../clipboard";
 import { saveMarkdownFile } from "../files";
-import { PLAN_FORMAT_GUIDE } from "../format";
+import { FORMAT_GUIDE, PLAN_FORMAT_GUIDE } from "../format";
 import { tabBar } from "../tabs";
 
 export function esc(s: string): string {
@@ -36,7 +36,7 @@ export async function renderLibrary(root: HTMLElement) {
         <div class="section-head">
           <h2>Plans</h2>
           <div class="section-actions">
-            <button class="btn" id="uploadplan">📂 Upload plan</button>
+            <button class="btn" id="uploadplan">📂 Upload</button>
             <button class="btn" id="planformat">📄 Format .md</button>
           </div>
         </div>
@@ -60,11 +60,11 @@ export async function renderLibrary(root: HTMLElement) {
                            <span class="name">📋 ${esc(p.name)}</span>
                            <span class="meta">${p.day_count} day${p.day_count === 1 ? "" : "s"} · ${p.first_date} → ${p.last_date}</span>
                          </div>
-                         <div class="actions">
-                           <button class="btn primary plan-sync" data-slug="${esc(p.slug)}">⟳ Sync upcoming</button>
-                           <button class="btn plan-newver" data-slug="${esc(p.slug)}">⇧ New version</button>
-                           <button class="btn plan-export" data-slug="${esc(p.slug)}">⇩ Export .md</button>
-                           <button class="btn plan-copy" data-slug="${esc(p.slug)}">⧉ Copy to clipboard</button>
+                         <div class="actions compact">
+                           <button class="btn primary plan-sync" data-slug="${esc(p.slug)}">⟳ Sync</button>
+                           <button class="btn plan-newver" data-slug="${esc(p.slug)}">⇧ Version</button>
+                           <button class="btn plan-export" data-slug="${esc(p.slug)}">⇩ Export</button>
+                           <button class="btn plan-copy" data-slug="${esc(p.slug)}">⧉ Copy</button>
                            <button class="btn danger plan-delete" data-slug="${esc(p.slug)}">Delete</button>
                          </div>
                        </div>`,
@@ -72,7 +72,13 @@ export async function renderLibrary(root: HTMLElement) {
                 .join("")
         }
         <div id="libstatus" class="editor-status"></div>
-        <div class="section-head"><h2>Single workouts</h2></div>
+        <div class="section-head">
+          <h2>Single workouts</h2>
+          <div class="section-actions">
+            <button class="btn" id="uploadworkout">📂 Upload</button>
+            <button class="btn" id="workoutformat">📄 Format .md</button>
+          </div>
+        </div>
         <ul class="workout-list">
           ${
             items.length === 0
@@ -109,6 +115,7 @@ export async function renderLibrary(root: HTMLElement) {
         </ul>
       </div>
       <input type="file" id="planfile" accept=".md,.markdown,.txt" hidden>
+      <input type="file" id="workoutfile" accept=".md,.markdown,.txt" hidden>
       ${tabBar("library")}
     </div>`;
 
@@ -194,6 +201,35 @@ export async function renderLibrary(root: HTMLElement) {
   });
 
   // ---- single workouts ----
+
+  const workoutFile = root.querySelector<HTMLInputElement>("#workoutfile")!;
+
+  root.querySelector("#uploadworkout")!.addEventListener("click", () => {
+    workoutFile.click();
+  });
+  root.querySelector("#workoutformat")!.addEventListener("click", () => {
+    saveMarkdownFile("wltimer-format.md", FORMAT_GUIDE);
+    showStatus("✓ format guide exported — give it to Claude to write workouts", true);
+  });
+  workoutFile.addEventListener("change", async () => {
+    const file = workoutFile.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    // Plan files (dated ## headings) import as plans, not single workouts.
+    const planCheck = await api.parsePlanPreview(text);
+    try {
+      if (planCheck.status === "ok") {
+        const sum = await api.savePlan(text, null);
+        showStatus(`✓ "${sum.name}" saved — ${sum.day_count} days synced to the calendar`, true);
+      } else {
+        const sum = await api.saveWorkout(text, null);
+        showStatus(`✓ "${sum.name}" imported`, true);
+      }
+      await renderLibrary(root);
+    } catch (e) {
+      showParseErrors(e);
+    }
+  });
 
   root.querySelectorAll<HTMLButtonElement>("button.copy").forEach((btn) => {
     btn.addEventListener("click", async () => {

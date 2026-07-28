@@ -8,7 +8,6 @@ import {
   type Workout,
 } from "../api";
 import { saveMarkdownFile } from "../files";
-import { FORMAT_GUIDE } from "../format";
 import { tabBar } from "../tabs";
 import { esc } from "./library";
 
@@ -173,7 +172,8 @@ export async function renderBuilder(root: HTMLElement, slug: string | null, asTa
         <header class="topbar">
           ${asTab ? "" : `<a class="btn" href="${backHash}">‹ Back</a>`}
           <h1>${dayDate ? `Workout · ${dayDate}` : asTab ? "Quick workout" : "Edit workout"}</h1>
-          <button class="btn primary" id="save">Save</button>
+          <button class="btn" id="save">Save</button>
+          <button class="btn primary" id="go">Start</button>
         </header>
         <div class="quick-form">
           <input id="wname" class="text-input" placeholder="Workout name (needed to save)"
@@ -217,15 +217,11 @@ export async function renderBuilder(root: HTMLElement, slug: string | null, asTa
             .join("")}
           <button class="btn" id="addpart">+ Add part</button>
           <div class="builder-tools">
-            <button class="btn" id="upload">📂 Upload .md</button>
             <button class="btn" id="exportmd">⇩ Export .md</button>
-            <button class="btn" id="formatspec">📄 Format .md</button>
           </div>
           <div id="status" class="editor-status"></div>
           <div class="quick-total">total ${fmtDuration(workoutTotalSecs(w))} (incl. ${PREPARE_SECS}s get-ready)</div>
-          <button class="btn start" id="go">START</button>
         </div>
-        <input type="file" id="file" accept=".md,.markdown,.txt" hidden>
         ${asTab ? tabBar("quick") : ""}
       </div>`;
 
@@ -286,35 +282,6 @@ export async function renderBuilder(root: HTMLElement, slug: string | null, asTa
       renderForm();
     });
 
-    const fileInput = root.querySelector<HTMLInputElement>("#file")!;
-    root.querySelector("#upload")!.addEventListener("click", () => fileInput.click());
-    fileInput.addEventListener("change", async () => {
-      const file = fileInput.files?.[0];
-      if (!file) return;
-      const text = await file.text();
-      // Plan files (dated ## headings) import as plans, which live on the
-      // Workouts tab — not into this form.
-      const planCheck = await api.parsePlanPreview(text);
-      if (planCheck.status === "ok") {
-        try {
-          await api.savePlan(text, null);
-          location.hash = "#/library";
-        } catch (e) {
-          showErrors(e as ParseError[]);
-        }
-        return;
-      }
-      const parsed = await api.parseFull(text);
-      if (parsed.status === "ok") {
-        w = parsed.workout;
-        openNotes.clear();
-        renderForm();
-        showMessage(`✓ imported "${parsed.workout.name}"`);
-      } else {
-        showErrors(parsed.errors);
-      }
-    });
-
     root.querySelector("#exportmd")!.addEventListener("click", async () => {
       const workout = withDefaults();
       const source = await api.serializeWorkout(workout);
@@ -323,11 +290,6 @@ export async function renderBuilder(root: HTMLElement, slug: string | null, asTa
         source,
       );
       showMessage("✓ exported as .md file");
-    });
-
-    root.querySelector("#formatspec")!.addEventListener("click", () => {
-      saveMarkdownFile("wltimer-format.md", FORMAT_GUIDE);
-      showMessage("✓ format guide exported — give it to Claude to write workouts");
     });
 
     root.querySelector("#save")!.addEventListener("click", () => void save());
