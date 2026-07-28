@@ -158,7 +158,7 @@ export async function renderRun(root: HTMLElement, target: string) {
     initAudio();
     try {
       plan = quick
-        ? await api.startQuick(quick.parts, quick.restBetweenSecs)
+        ? await api.startQuick(quick.parts)
         : await api.startWorkout(target);
     } catch (e) {
       el("ovmeta").textContent = String(e);

@@ -7,40 +7,49 @@ export interface QuickPart {
   intervals: number;
   workSecs: number;
   restSecs: number;
+  /** Rest after this part; only used when another part follows. */
+  restAfterSecs: number;
 }
 
 export interface QuickSettings {
   parts: QuickPart[];
-  restBetweenSecs: number;
 }
 
-const DEFAULT_PART: QuickPart = { intervals: 5, workSecs: 60, restSecs: 30 };
+const DEFAULT_PART: QuickPart = { intervals: 5, workSecs: 60, restSecs: 30, restAfterSecs: 60 };
 
 export function loadQuick(): QuickSettings {
   try {
     const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}");
     if (Array.isArray(raw.parts) && raw.parts.length > 0) {
-      return { parts: raw.parts, restBetweenSecs: raw.restBetweenSecs ?? 60 };
-    }
-    // Migrate the old single-part shape (or fall through to defaults).
-    if (typeof raw.intervals === "number") {
+      // Older shapes had a single global restBetweenSecs instead of per-part.
+      const fallbackRestAfter = raw.restBetweenSecs ?? DEFAULT_PART.restAfterSecs;
       return {
-        parts: [{ intervals: raw.intervals, workSecs: raw.workSecs, restSecs: raw.restSecs }],
-        restBetweenSecs: 60,
+        parts: raw.parts.map((p: Partial<QuickPart>) => ({
+          ...DEFAULT_PART,
+          ...p,
+          restAfterSecs: p.restAfterSecs ?? fallbackRestAfter,
+        })),
       };
     }
   } catch {
     // fall through
   }
-  return { parts: [{ ...DEFAULT_PART }], restBetweenSecs: 60 };
+  return { parts: [{ ...DEFAULT_PART }] };
 }
 
 export function quickTotalSecs(s: QuickSettings): number {
-  const partsSecs = s.parts.reduce(
-    (sum, p) => sum + p.intervals * p.workSecs + (p.intervals - 1) * p.restSecs,
-    0,
+  const last = s.parts.length - 1;
+  return (
+    PREPARE_SECS +
+    s.parts.reduce(
+      (sum, p, i) =>
+        sum +
+        p.intervals * p.workSecs +
+        (p.intervals - 1) * p.restSecs +
+        (i < last ? p.restAfterSecs : 0),
+      0,
+    )
   );
-  return PREPARE_SECS + partsSecs + (s.parts.length - 1) * s.restBetweenSecs;
 }
 
 export async function renderQuick(root: HTMLElement) {
@@ -92,18 +101,18 @@ export async function renderQuick(root: HTMLElement) {
                 <span class="quick-label">Rest</span>
                 ${stepper(`${i}.restSecs`, p.restSecs > 0 ? fmtDuration(p.restSecs) : "none", "15", "15")}
               </div>
+              ${
+                i < s.parts.length - 1
+                  ? `<div class="quick-row">
+                       <span class="quick-label">Rest after part</span>
+                       ${stepper(`${i}.restAfterSecs`, p.restAfterSecs > 0 ? fmtDuration(p.restAfterSecs) : "none", "15", "15")}
+                     </div>`
+                  : ""
+              }
             </div>`,
             )
             .join("")}
           <button class="btn" id="addpart">+ Add part</button>
-          ${
-            multi
-              ? `<div class="quick-row">
-                   <span class="quick-label">Rest between parts</span>
-                   ${stepper("restBetweenSecs", s.restBetweenSecs > 0 ? fmtDuration(s.restBetweenSecs) : "none", "15", "15")}
-                 </div>`
-              : ""
-          }
           <div class="quick-total" id="total">total ${fmtDuration(quickTotalSecs(s))} (incl. ${PREPARE_SECS}s get-ready)</div>
           <button class="btn start" id="go">START</button>
         </div>
@@ -114,14 +123,10 @@ export async function renderQuick(root: HTMLElement) {
       st.querySelectorAll<HTMLButtonElement>("button.step").forEach((btn) => {
         btn.addEventListener("click", () => {
           const delta = Number(btn.dataset.d) * (btn.classList.contains("plus") ? 1 : -1);
-          if (id === "restBetweenSecs") {
-            s.restBetweenSecs = Math.max(0, s.restBetweenSecs + delta);
-          } else {
-            const [idx, field] = id.split(".") as [string, keyof QuickPart];
-            const part = s.parts[Number(idx)];
-            const min = field === "intervals" ? 1 : field === "workSecs" ? 15 : 0;
-            part[field] = Math.max(min, part[field] + delta);
-          }
+          const [idx, field] = id.split(".") as [string, keyof QuickPart];
+          const part = s.parts[Number(idx)];
+          const min = field === "intervals" ? 1 : field === "workSecs" ? 15 : 0;
+          part[field] = Math.max(min, part[field] + delta);
           save();
           render();
         });

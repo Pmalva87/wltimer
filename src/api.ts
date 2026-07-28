@@ -70,9 +70,8 @@ export const api = {
   parsePreview: (source: string) => invoke<Preview>("parse_preview", { source }),
   startWorkout: (slug: string) => invoke<RunPlan>("start_workout", { slug }),
   startQuick: (
-    parts: { intervals: number; workSecs: number; restSecs: number }[],
-    restBetweenSecs: number,
-  ) => invoke<RunPlan>("start_quick", { parts, restBetweenSecs }),
+    parts: { intervals: number; workSecs: number; restSecs: number; restAfterSecs: number }[],
+  ) => invoke<RunPlan>("start_quick", { parts }),
   pause: () => invoke<void>("pause_timer"),
   resume: () => invoke<void>("resume_timer"),
   stop: () => invoke<void>("stop_timer"),

@@ -84,17 +84,17 @@ pub struct QuickPart {
     pub intervals: u32,
     pub work_secs: u32,
     pub rest_secs: u32,
+    /// Rest after this part; only takes effect when another part follows.
+    pub rest_after_secs: u32,
 }
 
 /// Start a one-off timer built from UI parameters instead of a saved markdown
-/// workout. Each part becomes a block; `rest_between_secs` is inserted after
-/// every part except the last.
+/// workout. Each part becomes a block.
 #[tauri::command]
 pub fn start_quick(
     app: AppHandle,
     state: State<AppState>,
     parts: Vec<QuickPart>,
-    rest_between_secs: u32,
 ) -> Result<RunPlan, String> {
     if parts.is_empty() {
         return Err("add at least one part".into());
@@ -116,7 +116,7 @@ pub fn start_quick(
                 intervals: p.intervals,
                 work_secs: p.work_secs,
                 rest_secs: (p.rest_secs > 0).then_some(p.rest_secs),
-                rest_after_secs: (rest_between_secs > 0).then_some(rest_between_secs),
+                rest_after_secs: (p.rest_after_secs > 0).then_some(p.rest_after_secs),
                 color: None,
             })
         })
