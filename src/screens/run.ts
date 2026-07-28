@@ -2,6 +2,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { api, fmtDuration, type Cue, type PhaseKind, type RunPlan, type Snapshot } from "../api";
 import { initAudio, sounds, vibrate } from "../audio";
 import { esc } from "./library";
+import { loadQuick, quickTotalSecs } from "./quick";
 
 const COLORS: Record<PhaseKind, string> = {
   prepare: "#334155",
@@ -17,7 +18,9 @@ const LABELS: Record<PhaseKind, string> = {
   block_rest: "BLOCK REST",
 };
 
-export async function renderRun(root: HTMLElement, slug: string) {
+/** `target` is a saved workout slug, or `quick` (settings read from local storage). */
+export async function renderRun(root: HTMLElement, target: string) {
+  const quick = target === "quick" ? loadQuick() : null;
   root.innerHTML = `
     <div class="screen run" id="runscreen">
       <header class="topbar run-top">
@@ -25,6 +28,7 @@ export async function renderRun(root: HTMLElement, slug: string) {
         <span id="wname" class="run-title"></span>
         <span id="phasecount" class="run-count"></span>
       </header>
+      <div id="totalleft" class="total-left"></div>
       <main class="run-main">
         <div id="blockname" class="block-name"></div>
         <div id="phaselabel" class="phase-label"></div>
@@ -78,17 +82,21 @@ export async function renderRun(root: HTMLElement, slug: string) {
         : "";
     const frac = s.phase_secs > 0 ? 1 - s.remaining_ms / (s.phase_secs * 1000) : 0;
     el("progressfill").style.width = `${Math.min(100, Math.max(0, frac * 100))}%`;
+    el("totalleft").innerHTML =
+      `<span class="total-left-label">workout left</span> ${fmtDuration(Math.ceil(s.total_remaining_ms / 1000))}`;
 
-    // Description: current block while working/resting, upcoming block otherwise.
+    // Notes panel: current block while working/resting, upcoming block otherwise.
+    // Blocks without notes (e.g. quick timers) show nothing.
     const descIdx =
       kind === "work" || kind === "rest" ? s.block_idx : (s.next_block_idx ?? s.block_idx);
     const descBlock = plan.blocks[descIdx];
     if (descIdx !== lastDescIdx && descBlock) {
       lastDescIdx = descIdx;
-      el("desc").innerHTML =
-        (kind === "prepare" || kind === "block_rest"
-          ? `<div class="next-block">Up next: ${esc(descBlock.name)}</div>`
-          : "") + descBlock.description_html;
+      el("desc").innerHTML = descBlock.description_html
+        ? (kind === "prepare" || kind === "block_rest"
+            ? `<div class="next-block">Up next: ${esc(descBlock.name)}</div>`
+            : "") + descBlock.description_html
+        : "";
     }
     if (s.next_kind) {
       const nextBlock = plan.blocks[s.next_block_idx ?? 0];
@@ -149,7 +157,9 @@ export async function renderRun(root: HTMLElement, slug: string) {
   el("start").addEventListener("click", async () => {
     initAudio();
     try {
-      plan = await api.startWorkout(slug);
+      plan = quick
+        ? await api.startQuick(quick.parts, quick.restBetweenSecs)
+        : await api.startWorkout(target);
     } catch (e) {
       el("ovmeta").textContent = String(e);
       return;
@@ -158,15 +168,23 @@ export async function renderRun(root: HTMLElement, slug: string) {
     el("wname").textContent = plan.workout_name;
   });
 
-  el("ovname").textContent = slug;
-  // Show real name/duration on the start overlay without starting the timer.
-  void api.listWorkouts().then((items) => {
-    const w = items.find((i) => i.slug === slug);
-    if (w) {
-      el("ovname").textContent = w.name;
-      el("ovmeta").textContent = `${w.block_count} exercise${w.block_count === 1 ? "" : "s"} · ${fmtDuration(w.total_secs)}`;
-    }
-  });
+  // Show name/duration on the start overlay without starting the timer.
+  if (quick) {
+    el("ovname").textContent = "Quick Timer";
+    el("ovmeta").textContent =
+      quick.parts
+        .map((p) => `${p.intervals} × ${fmtDuration(p.workSecs)}`)
+        .join("  ·  ") + `  ·  total ${fmtDuration(quickTotalSecs(quick))}`;
+  } else {
+    el("ovname").textContent = target;
+    void api.listWorkouts().then((items) => {
+      const w = items.find((i) => i.slug === target);
+      if (w) {
+        el("ovname").textContent = w.name;
+        el("ovmeta").textContent = `${w.block_count} exercise${w.block_count === 1 ? "" : "s"} · ${fmtDuration(w.total_secs)}`;
+      }
+    });
+  }
 
   pauseBtn.addEventListener("click", async () => {
     if (finished) return;

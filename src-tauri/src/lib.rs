@@ -26,6 +26,7 @@ pub fn run() {
             commands::delete_workout,
             commands::parse_preview,
             commands::start_workout,
+            commands::start_quick,
             commands::pause_timer,
             commands::resume_timer,
             commands::stop_timer,

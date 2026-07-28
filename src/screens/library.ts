@@ -6,6 +6,7 @@ export async function renderLibrary(root: HTMLElement) {
     <div class="screen library">
       <header class="topbar">
         <h1>wltimer</h1>
+        <a class="btn" href="#/quick">⚡ Quick</a>
         <a class="btn primary" href="#/edit">+ New</a>
       </header>
       <ul class="workout-list">

@@ -29,6 +29,8 @@ pub struct Snapshot {
     pub phase_kind: Option<PhaseKind>,
     pub phase_secs: u32,
     pub remaining_ms: u64,
+    /// Time left for the whole workout: current phase remainder + all later phases.
+    pub total_remaining_ms: u64,
     pub block_idx: usize,
     pub interval_idx: u32,
     pub next_kind: Option<PhaseKind>,
@@ -190,6 +192,15 @@ impl Engine {
         } else {
             None
         };
+        let total_remaining_ms = if showing {
+            let future_ms: u64 = self.phases[self.idx + 1..]
+                .iter()
+                .map(|p| p.secs as u64 * 1000)
+                .sum();
+            remaining_ms + future_ms
+        } else {
+            0
+        };
         Snapshot {
             state: self.state,
             phase_idx: self.idx,
@@ -197,6 +208,7 @@ impl Engine {
             phase_kind: if showing { phase.map(|p| p.kind) } else { None },
             phase_secs: phase.map(|p| p.secs).unwrap_or(0),
             remaining_ms,
+            total_remaining_ms,
             block_idx: phase.map(|p| p.block_idx).unwrap_or(0),
             interval_idx: phase.map(|p| p.interval_idx).unwrap_or(0),
             next_kind: next.map(|p| p.kind),
@@ -265,6 +277,8 @@ mod tests {
         assert_eq!(snap.phase_kind, Some(PhaseKind::Work));
         assert_eq!(snap.interval_idx, 2);
         assert_eq!(snap.remaining_ms, 9000);
+        // 50s workout, 26s in: 24s left overall.
+        assert_eq!(snap.total_remaining_ms, 24_000);
 
         let cues = e.advance(t0 + secs(36));
         assert_eq!(cues, vec![Cue::PhaseStart { phase: PhaseKind::BlockRest }]);

@@ -4,7 +4,7 @@ use std::sync::Mutex;
 use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager, State};
 use wltimer_core::engine::{Engine, Snapshot};
-use wltimer_core::model::Phase;
+use wltimer_core::model::{Block, Phase, Workout};
 use wltimer_core::parser::{self, ParseError};
 
 pub struct AppState {
@@ -78,11 +78,65 @@ pub fn parse_preview(source: String) -> Preview {
     }
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuickPart {
+    pub intervals: u32,
+    pub work_secs: u32,
+    pub rest_secs: u32,
+}
+
+/// Start a one-off timer built from UI parameters instead of a saved markdown
+/// workout. Each part becomes a block; `rest_between_secs` is inserted after
+/// every part except the last.
+#[tauri::command]
+pub fn start_quick(
+    app: AppHandle,
+    state: State<AppState>,
+    parts: Vec<QuickPart>,
+    rest_between_secs: u32,
+) -> Result<RunPlan, String> {
+    if parts.is_empty() {
+        return Err("add at least one part".into());
+    }
+    let single = parts.len() == 1;
+    let blocks = parts
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            if p.intervals < 1 {
+                return Err(format!("part {}: intervals must be at least 1", i + 1));
+            }
+            if p.work_secs < 1 {
+                return Err(format!("part {}: work time must be at least 1 second", i + 1));
+            }
+            Ok(Block {
+                name: if single { "Work".into() } else { format!("Part {}", i + 1) },
+                description_md: String::new(),
+                intervals: p.intervals,
+                work_secs: p.work_secs,
+                rest_secs: (p.rest_secs > 0).then_some(p.rest_secs),
+                rest_after_secs: (rest_between_secs > 0).then_some(rest_between_secs),
+                color: None,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let workout = Workout {
+        name: "Quick Timer".into(),
+        blocks,
+    };
+    start(app, state, workout)
+}
+
 #[tauri::command]
 pub fn start_workout(app: AppHandle, state: State<AppState>, slug: String) -> Result<RunPlan, String> {
     let source = state.store.read_source(&slug)?;
     let workout = parser::parse_workout(&source)
         .map_err(|e| format!("workout no longer parses — line {}: {}", e[0].line, e[0].message))?;
+    start(app, state, workout)
+}
+
+fn start(app: AppHandle, state: State<AppState>, workout: Workout) -> Result<RunPlan, String> {
     let plan = RunPlan {
         workout_name: workout.name.clone(),
         blocks: workout

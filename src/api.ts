@@ -49,6 +49,7 @@ export interface Snapshot {
   phase_kind: PhaseKind | null;
   phase_secs: number;
   remaining_ms: number;
+  total_remaining_ms: number;
   block_idx: number;
   interval_idx: number;
   next_kind: PhaseKind | null;
@@ -68,6 +69,10 @@ export const api = {
   deleteWorkout: (slug: string) => invoke<void>("delete_workout", { slug }),
   parsePreview: (source: string) => invoke<Preview>("parse_preview", { source }),
   startWorkout: (slug: string) => invoke<RunPlan>("start_workout", { slug }),
+  startQuick: (
+    parts: { intervals: number; workSecs: number; restSecs: number }[],
+    restBetweenSecs: number,
+  ) => invoke<RunPlan>("start_quick", { parts, restBetweenSecs }),
   pause: () => invoke<void>("pause_timer"),
   resume: () => invoke<void>("resume_timer"),
   stop: () => invoke<void>("stop_timer"),
