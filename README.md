@@ -1,6 +1,7 @@
-# wltimer
+# wltimer — Weightlifting Timer
 
-Weightlifting interval timer for Android, built with Rust + Tauri 2.
+Weightlifting interval timer for Android ("Weightlifting Timer" on the
+launcher), built with Rust + Tauri 2.
 
 A workout is a sequence of **parts** (exercises), each with its own number of
 intervals, work time, optional rest between intervals, and optional rest after

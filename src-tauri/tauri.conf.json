@@ -13,7 +13,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "wltimer",
+        "title": "Weightlifting Timer",
         "width": 420,
         "height": 800
       }
