@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "android:apk": "tauri android build --apk --target aarch64 && node scripts/copy-apk.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2"

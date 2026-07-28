@@ -86,9 +86,14 @@ Requires: JDK 17, Android SDK + NDK, Rust target `aarch64-linux-android`.
 export JAVA_HOME=~/Android/jdk-17.0.20+8
 export ANDROID_HOME=~/Android/sdk
 export NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018
-npm run tauri android build -- --apk --target aarch64
-adb install src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk
+npm run android:apk
+adb install src-tauri/gen/android/app/build/outputs/apk/universal/release/wltimer-<version>.apk
 ```
+
+`npm run android:apk` builds the APK and copies it alongside the original as
+`wltimer-<version>.apk` (version from `package.json`), so each build has a
+distinct filename — useful when sideloading via a cloud share, since some
+downloaders/browsers reuse a cached file for a name they've already fetched.
 
 The generated Android project (`src-tauri/gen/android`) carries one manual
 patch: `FLAG_KEEP_SCREEN_ON` in `MainActivity.kt`, so the screen stays awake
