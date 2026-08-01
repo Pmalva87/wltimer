@@ -849,13 +849,13 @@ details.notes textarea {
   word-break: break-all;
 }
 
-/* Denser action row: trims horizontal padding and gap only, so five buttons
-   fit without shrinking the tap target's height. */
-.workout .actions.dense {
+/* Denser action row: trims horizontal padding and gap only, so five or six
+   buttons fit without shrinking the tap target's height. */
+.actions.dense {
   gap: 0.4rem;
 }
 
-.workout .actions.dense .btn {
+.actions.dense .btn {
   padding-left: 0.65rem;
   padding-right: 0.65rem;
   font-size: 0.95rem;

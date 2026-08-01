@@ -55,13 +55,13 @@ export async function renderCalendar(root: HTMLElement, dateArg: string | null) 
                  <button class="btn primary" id="moveok" data-i="${i}">Move</button>
                  <button class="btn" id="movecancel">Cancel</button>
                </div>`
-            : `<div class="actions">
+            : `<div class="actions dense">
                  <a class="btn primary" href="#/run/@${selected}:${i}">▶ Run</a>
                  <a class="btn" href="#/view/@${selected}:${i}">👁 View</a>
-                 <button class="btn copy" data-i="${i}">⧉ Copy to clipboard</button>
-                 <button class="btn promote" data-i="${i}">☆ Save to library</button>
                  <button class="btn move" data-i="${i}">⇄ Move</button>
-                 <button class="btn danger delete" data-i="${i}">Remove</button>
+                 <button class="btn danger delete" data-i="${i}">🗑 Remove</button>
+                 <button class="btn copy" data-i="${i}">⧉ Copy</button>
+                 <button class="btn promote" data-i="${i}">☆ To library</button>
                </div>`
         }
       </div>`;
@@ -220,7 +220,7 @@ export async function renderCalendar(root: HTMLElement, dateArg: string | null) 
           btn.textContent = "Sure?";
           setTimeout(() => {
             delete btn.dataset.armed;
-            btn.textContent = "Remove";
+            btn.textContent = "🗑 Remove";
           }, 3000);
         }
       });
