@@ -4,6 +4,7 @@ use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager, State};
 use wltimer_core::days::{self, DayEntry, DayStatus, DayStore, DaySummary};
 use wltimer_core::engine::{Cue, Engine, Snapshot};
+use wltimer_core::ids;
 use wltimer_core::model::{Phase, Workout};
 use wltimer_core::parser::{self, ParseError};
 use wltimer_core::plan::{Plan, PlanStore, PlanSummary};
@@ -199,6 +200,7 @@ pub fn add_day_entry(
 ) -> Result<usize, Vec<ParseError>> {
     date_errors(&date)?;
     parser::parse_workout(&source)?;
+    let (source, _) = ids::ensure_id(&source);
     state
         .days
         .add(&date, planned_entry(source, None))
@@ -213,6 +215,9 @@ pub fn add_day_from_library(
 ) -> Result<usize, String> {
     check_date(&date)?;
     let source = state.store.read_source(&slug)?;
+    // A scheduled copy is a new occurrence, not the template: it gets its own
+    // id so the two never collide. Provenance stays in `source_slug`.
+    let (source, _) = ids::with_new_id(&source);
     state.days.add(&date, planned_entry(source, Some(slug)))
 }
 
@@ -227,7 +232,15 @@ pub fn update_day_entry(
     parser::parse_workout(&source)?;
     state
         .days
-        .update(&date, index, |e| e.markdown = source)
+        .update(&date, index, |e| {
+            // Editing an entry must not re-mint its identity, or the next plan
+            // sync would no longer recognise it. A document arriving without an
+            // id inherits the one the entry already had.
+            e.markdown = match (ids::extract_id(&source), days::entry_id(e)) {
+                (None, Some(existing)) => ids::set_id(&source, &existing),
+                _ => ids::ensure_id(&source).0,
+            };
+        })
         .map_err(|message| vec![ParseError { line: 1, message }])
 }
 
@@ -261,7 +274,10 @@ pub fn promote_day_entry(
     let entry = entries
         .get(index)
         .ok_or_else(|| vec![ParseError { line: 1, message: format!("no entry {index} on {date}") }])?;
-    state.store.save(&entry.markdown, None)
+    // The library template is a new object, distinct from the dated entry it
+    // was taken from, so it gets its own id rather than sharing the entry's.
+    let (source, _) = ids::with_new_id(&entry.markdown);
+    state.store.save(&source, None)
 }
 
 // ---- training plans ----
@@ -503,7 +519,11 @@ fn maybe_record(state: &AppState, engine: &Engine, cues: &[Cue]) {
     let origin = std::mem::replace(&mut *state.origin.lock().unwrap(), RunOrigin::None);
     let now = chrono::Local::now().to_rfc3339();
     let done = |markdown: String, source_slug: Option<String>| DayEntry {
-        markdown,
+        // A finished run is its own occurrence on the calendar, distinct from
+        // the library template it was started from, so it gets its own id.
+        // (A run that came *from* a calendar entry takes the branch above and
+        // keeps that entry's id — which is how a sync knows it is done.)
+        markdown: ids::with_new_id(&markdown).0,
         status: DayStatus::Done,
         completed_at: Some(now.clone()),
         source_slug,

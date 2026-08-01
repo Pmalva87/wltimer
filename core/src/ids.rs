@@ -109,6 +109,11 @@ pub fn ensure_id(source: &str) -> (String, String) {
     }
 }
 
+/// Return the document carrying exactly this id, replacing any it already had.
+pub fn set_id(source: &str, id: &str) -> String {
+    insert_id(&strip_id(source), id)
+}
+
 /// Return the document carrying a *fresh* id, replacing any it already had.
 ///
 /// For copies that are new occurrences rather than the same workout: putting
@@ -116,8 +121,7 @@ pub fn ensure_id(source: &str) -> (String, String) {
 /// library. Both would otherwise leave two objects sharing one identity.
 pub fn with_new_id(source: &str) -> (String, String) {
     let id = new_id();
-    let stripped: String = strip_id(source);
-    (insert_id(&stripped, &id), id)
+    (set_id(source, &id), id)
 }
 
 /// Drop the preamble's id bullet, if any.

@@ -2,6 +2,7 @@
 //! of workouts planned or done that day. Every entry embeds its own complete
 //! markdown copy, so the same workout can live on many days independently.
 
+use crate::ids;
 use crate::parser;
 use crate::zio;
 use serde::{Deserialize, Serialize};
@@ -55,6 +56,16 @@ pub fn entry_name(entry: &DayEntry) -> String {
         .unwrap_or_else(|_| "Workout".into())
 }
 
+/// The entry's document id, read from its embedded markdown.
+///
+/// Identity deliberately lives in the markdown rather than in a `DayEntry`
+/// field: `load` silently falls back to an empty day on any deserialize
+/// failure, so a JSON schema change that goes wrong looks like a wiped
+/// calendar. This also leaves no second copy that could drift.
+pub fn entry_id(entry: &DayEntry) -> Option<String> {
+    ids::extract_id(&entry.markdown)
+}
+
 pub struct DayStore {
     dir: PathBuf,
 }
@@ -62,7 +73,27 @@ pub struct DayStore {
 impl DayStore {
     pub fn new(dir: PathBuf) -> std::io::Result<Self> {
         fs::create_dir_all(&dir)?;
-        Ok(DayStore { dir })
+        let store = DayStore { dir };
+        store.backfill_ids();
+        Ok(store)
+    }
+
+    /// One-time migration: entries scheduled before ids existed get one, so a
+    /// plan sync can recognise them instead of scheduling a duplicate copy.
+    fn backfill_ids(&self) {
+        for date in self.dates_from("") {
+            let mut entries = self.load(&date);
+            let mut changed = false;
+            for entry in &mut entries {
+                if entry_id(entry).is_none() {
+                    entry.markdown = ids::ensure_id(&entry.markdown).0;
+                    changed = true;
+                }
+            }
+            if changed {
+                let _ = self.save(&date, &entries);
+            }
+        }
     }
 
     fn path(&self, date: &str) -> PathBuf {
@@ -203,6 +234,30 @@ mod tests {
     }
 
     const MD: &str = "# Squats\n\n## A\n- work: 30\n";
+
+    #[test]
+    fn entry_id_reads_the_embedded_document_id() {
+        let (md, id) = ids::ensure_id(MD);
+        assert_eq!(entry_id(&entry(&md)).as_deref(), Some(id.as_str()));
+        assert_eq!(entry_id(&entry(MD)), None);
+    }
+
+    #[test]
+    fn backfills_ids_for_entries_scheduled_before_ids_existed() {
+        let dir = std::env::temp_dir().join(format!("wltimer-days-bf-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let s = DayStore::new(dir.clone()).unwrap();
+        s.add("2026-07-28", entry(MD)).unwrap();
+        s.add("2026-07-28", entry(MD)).unwrap();
+        assert!(s.load("2026-07-28").iter().all(|e| entry_id(e).is_none()));
+
+        // Re-opening the store migrates what is already on disk.
+        let s = DayStore::new(dir).unwrap();
+        let entries = s.load("2026-07-28");
+        let a = entry_id(&entries[0]).expect("backfilled");
+        let b = entry_id(&entries[1]).expect("backfilled");
+        assert_ne!(a, b, "each entry is its own occurrence");
+    }
 
     #[test]
     fn add_load_update_delete() {
