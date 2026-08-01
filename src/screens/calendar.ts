@@ -61,7 +61,7 @@ export async function renderCalendar(root: HTMLElement, dateArg: string | null) 
                  <button class="btn move" data-i="${i}">⇄ Move</button>
                  <button class="btn danger delete" data-i="${i}">🗑 Remove</button>
                  <button class="btn copy" data-i="${i}">⧉ Copy</button>
-                 <button class="btn promote" data-i="${i}">☆ To library</button>
+                 <button class="btn promote" data-i="${i}">☆ Library</button>
                </div>`
         }
       </div>`;
