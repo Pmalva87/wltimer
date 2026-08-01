@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -7,7 +8,7 @@ use wltimer_core::engine::{Cue, Engine, Snapshot};
 use wltimer_core::ids;
 use wltimer_core::model::{Phase, Workout};
 use wltimer_core::parser::{self, ParseError};
-use wltimer_core::plan::{Plan, PlanStore, PlanSummary};
+use wltimer_core::plan::{self, Plan, PlanStore, PlanSummary};
 use wltimer_core::store::{Store, WorkoutSummary};
 
 /// Where the currently running workout came from — decides how a finished run
@@ -282,37 +283,27 @@ pub fn promote_day_entry(
 
 // ---- training plans ----
 
-/// Replace all still-planned entries of this plan on dates >= `from` with the
-/// plan's current content. Done entries and past dates are never touched.
-/// Returns the number of days scheduled.
+/// Load the upcoming calendar, merge the plan into it (see
+/// `plan::merge_into_calendar` for the matching rules), write back what
+/// changed. Returns the number of days scheduled or updated.
 fn sync_upcoming(state: &AppState, slug: &str, plan: &Plan, from: &str) -> usize {
-    for date in state.days.dates_from(from) {
-        let entries = state.days.load(&date);
-        let kept: Vec<DayEntry> = entries
-            .iter()
-            .filter(|e| !(e.status == DayStatus::Planned && e.source_plan.as_deref() == Some(slug)))
-            .cloned()
-            .collect();
-        if kept.len() != entries.len() {
-            let _ = state.days.save(&date, &kept);
-        }
+    let mut by_date: BTreeMap<String, Vec<DayEntry>> = state
+        .days
+        .dates_from(from)
+        .into_iter()
+        .map(|date| {
+            let entries = state.days.load(&date);
+            (date, entries)
+        })
+        .collect();
+
+    let (synced, dirty) = plan::merge_into_calendar(plan, slug, from, &mut by_date);
+
+    for date in dirty {
+        let entries = by_date.get(&date).map(Vec::as_slice).unwrap_or(&[]);
+        let _ = state.days.save(&date, entries);
     }
-    let mut scheduled = 0;
-    for day in &plan.days {
-        if day.date.as_str() >= from {
-            let entry = DayEntry {
-                markdown: day.workout_md.clone(),
-                status: DayStatus::Planned,
-                completed_at: None,
-                source_slug: None,
-                source_plan: Some(slug.to_string()),
-            };
-            if state.days.add(&day.date, entry).is_ok() {
-                scheduled += 1;
-            }
-        }
-    }
-    scheduled
+    synced
 }
 
 #[derive(Serialize)]
