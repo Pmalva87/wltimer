@@ -131,3 +131,8 @@ downloaders/browsers reuse a cached file for a name they've already fetched.
 The generated Android project (`src-tauri/gen/android`) carries one manual
 patch: `FLAG_KEEP_SCREEN_ON` in `MainActivity.kt`, so the screen stays awake
 during a workout.
+
+## Install on a phone
+
+See [INSTALL.md](INSTALL.md) — sideloading over `adb` or by copying the APK to
+the phone, plus signing/upgrade rules and troubleshooting.
