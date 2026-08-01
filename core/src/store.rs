@@ -1,5 +1,6 @@
 //! Library of workout templates: one zstd-compressed markdown file per workout.
 
+use crate::ids;
 use crate::parser;
 use crate::zio;
 use serde::Serialize;
@@ -60,6 +61,7 @@ impl Store {
         fs::create_dir_all(&dir)?;
         let store = Store { dir };
         store.migrate_plain_files();
+        store.backfill_ids();
         Ok(store)
     }
 
@@ -81,6 +83,49 @@ impl Store {
         }
     }
 
+    /// One-time migration: workouts stored before ids existed get one, so
+    /// every read path afterwards can assume identity is present. Runs after
+    /// `migrate_plain_files` so it only ever rewrites the compressed form.
+    fn backfill_ids(&self) {
+        for (slug, source) in self.stored() {
+            if ids::extract_id(&source).is_none() {
+                let (with_id, _) = ids::ensure_id(&source);
+                let _ = self.write(&slug, &with_id);
+            }
+        }
+    }
+
+    /// Every stored workout as `(slug, source)`, keyed so the compressed and
+    /// legacy plain form of one slug collapse to a single entry. Shared by
+    /// `list`, `find_by_id` and `backfill_ids` so they cannot disagree about
+    /// what counts as stored.
+    fn stored(&self) -> Vec<(String, String)> {
+        let Ok(entries) = fs::read_dir(&self.dir) else {
+            return Vec::new();
+        };
+        let mut by_slug: BTreeMap<String, String> = BTreeMap::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let slug = match name.strip_suffix(".md.zst").or_else(|| name.strip_suffix(".md")) {
+                Some(s) if !s.is_empty() => s.to_string(),
+                _ => continue,
+            };
+            if let Ok(source) = zio::read_text(&path) {
+                by_slug.insert(slug, source);
+            }
+        }
+        by_slug.into_iter().collect()
+    }
+
+    /// Slug of the stored workout carrying this id, if any.
+    pub fn find_by_id(&self, id: &str) -> Option<String> {
+        self.stored()
+            .into_iter()
+            .find(|(_, source)| ids::extract_id(source).as_deref() == Some(id))
+            .map(|(slug, _)| slug)
+    }
+
     fn path(&self, slug: &str) -> PathBuf {
         self.dir.join(format!("{slug}.md.zst"))
     }
@@ -90,39 +135,26 @@ impl Store {
     }
 
     pub fn list(&self) -> Vec<WorkoutSummary> {
-        let mut by_slug: BTreeMap<String, WorkoutSummary> = BTreeMap::new();
-        let Ok(entries) = fs::read_dir(&self.dir) else {
-            return Vec::new();
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            let slug = match name.strip_suffix(".md.zst").or_else(|| name.strip_suffix(".md")) {
-                Some(s) if !s.is_empty() => s.to_string(),
-                _ => continue,
-            };
-            let Ok(source) = zio::read_text(&path) else {
-                continue;
-            };
-            let summary = match parser::parse_workout(&source) {
+        let mut out: Vec<WorkoutSummary> = self
+            .stored()
+            .into_iter()
+            .map(|(slug, source)| match parser::parse_workout(&source) {
                 Ok(w) => WorkoutSummary {
-                    slug: slug.clone(),
+                    slug,
                     name: w.name.clone(),
                     block_count: w.blocks.len(),
                     total_secs: w.total_secs(),
                     error: None,
                 },
                 Err(errs) => WorkoutSummary {
-                    slug: slug.clone(),
                     name: slug.clone(),
+                    slug,
                     block_count: 0,
                     total_secs: 0,
                     error: Some(format!("line {}: {}", errs[0].line, errs[0].message)),
                 },
-            };
-            by_slug.insert(slug, summary);
-        }
-        let mut out: Vec<WorkoutSummary> = by_slug.into_values().collect();
+            })
+            .collect();
         out.sort_by_key(|s| s.name.to_lowercase());
         out
     }
@@ -138,16 +170,32 @@ impl Store {
     }
 
     /// Validate and write. Returns parse errors if the source is invalid.
-    /// When `prev_slug` is given and the workout was renamed, the old file is
-    /// removed. A name that collides with a *different* stored workout is
-    /// deduplicated with a counter: "Squats" → "Squats (2)", "Squats (3)"…
-    /// (the document's title line is rewritten to match).
+    ///
+    /// The document's id is the real handle: saving a workout the library
+    /// already holds updates it in place, wherever it came from — so
+    /// re-importing an exported `.md` edits the original instead of adding
+    /// "Squats (2)". Only a genuinely new workout whose *name* collides gets
+    /// the counter: "Squats" → "Squats (2)" (retitling the document to match).
+    /// When the name changed, the old file is removed.
     pub fn save(
         &self,
         source: &str,
         prev_slug: Option<&str>,
     ) -> Result<WorkoutSummary, Vec<parser::ParseError>> {
         let workout = parser::parse_workout(source)?;
+        let (source, id) = ids::ensure_id(source);
+        let owner = self.find_by_id(&id);
+
+        // Two files must never claim one identity. If this document carries the
+        // id of a *different* stored workout, it is a copy of it — pasting one
+        // workout's markdown into another's editor — so it gets its own.
+        let source = match (prev_slug, owner.as_deref()) {
+            (Some(prev), Some(other)) if other != prev => ids::with_new_id(&source).0,
+            _ => source,
+        };
+        let prev_slug = prev_slug.or(owner.as_deref());
+
+        let source = source.as_str();
         let mut name = workout.name.clone();
         let mut slug = slugify(&name);
         if prev_slug != Some(slug.as_str()) {
@@ -232,6 +280,75 @@ mod tests {
         let resaved = s.save(src, Some("squats")).unwrap();
         assert_eq!(resaved.slug, "squats");
         assert_eq!(resaved.name, "Squats");
+    }
+
+    #[test]
+    fn saving_gives_the_document_an_id() {
+        let s = temp_store("mint");
+        let sum = s.save("# Squats\n\n## A\n- work: 30\n", None).unwrap();
+        let stored = s.read_source(&sum.slug).unwrap();
+        assert!(ids::extract_id(&stored).is_some(), "{stored}");
+        assert!(stored.starts_with("# Squats\n- id: "), "{stored}");
+    }
+
+    #[test]
+    fn re_saving_a_document_with_a_known_id_updates_in_place() {
+        // The re-import case: export a workout, edit it elsewhere, upload it
+        // again. It must edit the original, not pile up "Squats (2)".
+        let s = temp_store("byid");
+        let first = s.save("# Squats\n\n## A\n- work: 30\n", None).unwrap();
+        let exported = s.read_source(&first.slug).unwrap();
+        let edited = exported.replace("- work: 30", "- work: 45");
+
+        let again = s.save(&edited, None).unwrap();
+        assert_eq!(again.slug, "squats");
+        assert_eq!(s.list().len(), 1, "must not have created a second workout");
+        assert!(s.read_source("squats").unwrap().contains("- work: 45"));
+    }
+
+    #[test]
+    fn a_renamed_document_with_a_known_id_is_renamed_not_copied() {
+        let s = temp_store("byidrename");
+        let first = s.save("# Squats\n\n## A\n- work: 30\n", None).unwrap();
+        let exported = s.read_source(&first.slug).unwrap();
+
+        let renamed = s.save(&exported.replace("# Squats", "# Front Squats"), None).unwrap();
+        assert_eq!(renamed.slug, "front-squats");
+        assert_eq!(renamed.name, "Front Squats");
+        assert_eq!(s.list().len(), 1);
+        assert!(s.read_source("squats").is_err(), "old slug should be gone");
+    }
+
+    #[test]
+    fn an_id_belonging_to_another_workout_is_not_stolen() {
+        // Pasting one workout's markdown into another's editor must not leave
+        // two stored files claiming the same identity.
+        let s = temp_store("steal");
+        let a = s.save("# A\n\n## X\n- work: 30\n", None).unwrap();
+        let b = s.save("# B\n\n## X\n- work: 30\n", None).unwrap();
+        let a_src = s.read_source(&a.slug).unwrap();
+
+        s.save(&a_src.replace("# A", "# B"), Some(&b.slug)).unwrap();
+        let a_id = ids::extract_id(&s.read_source(&a.slug).unwrap()).unwrap();
+        let b_id = ids::extract_id(&s.read_source(&b.slug).unwrap()).unwrap();
+        assert_ne!(a_id, b_id);
+    }
+
+    #[test]
+    fn backfills_ids_for_workouts_stored_before_ids_existed() {
+        let dir = std::env::temp_dir().join(format!("wltimer-store-bf-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        zio::write_compressed(
+            &dir.join("old.md.zst"),
+            b"# Old\n\n## A\n- work: 30\n",
+        )
+        .unwrap();
+
+        let s = Store::new(dir).unwrap();
+        let stored = s.read_source("old").unwrap();
+        let id = ids::extract_id(&stored).expect("backfill should have minted an id");
+        assert_eq!(s.find_by_id(&id).as_deref(), Some("old"));
     }
 
     #[test]
