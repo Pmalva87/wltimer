@@ -78,6 +78,12 @@ npm install
 npm run tauri dev            # desktop preview (needs libwebkit2gtk-4.1-dev librsvg2-dev)
 ```
 
+CI (`.github/workflows/ci.yml`) runs on every push to `main` and every pull
+request: `cargo test --workspace` plus `cargo clippy -- -D warnings`, and
+`npm run build` (`tsc && vite build`) for the frontend. There is no automated
+test for the UI in `src/` — only the type-check — so frontend changes still
+need a run through the app.
+
 ## Build for Android
 
 Requires: JDK 17, Android SDK + NDK, Rust target `aarch64-linux-android`.
