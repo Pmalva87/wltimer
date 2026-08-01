@@ -101,12 +101,12 @@ export async function renderLibrary(root: HTMLElement) {
                              <span class="name">${esc(w.name)}</span>
                              <span class="meta">${w.block_count} exercise${w.block_count === 1 ? "" : "s"} · ${fmtDuration(w.total_secs)}</span>
                            </a>
-                           <div class="actions">
+                           <div class="actions dense">
                              <a class="btn primary" href="#/run/${encodeURIComponent(w.slug)}">▶ Run</a>
                              <a class="btn" href="#/view/${encodeURIComponent(w.slug)}">👁 View</a>
-                             <button class="btn copy" data-slug="${esc(w.slug)}">⧉ Copy to clipboard</button>
+                             <button class="btn danger delete" data-slug="${esc(w.slug)}">🗑 Delete</button>
+                             <button class="btn copy" data-slug="${esc(w.slug)}">⧉ Copy</button>
                              <button class="btn dup" data-slug="${esc(w.slug)}">⊕ Duplicate</button>
-                             <button class="btn danger delete" data-slug="${esc(w.slug)}">Delete</button>
                            </div>
                          </li>`,
                   )
@@ -236,7 +236,7 @@ export async function renderLibrary(root: HTMLElement) {
       const source = await api.getSource(btn.dataset.slug!);
       btn.textContent = (await copyText(source)) ? "✓ Copied" : "Copy failed";
       setTimeout(() => {
-        btn.textContent = "⧉ Copy to clipboard";
+        btn.textContent = "⧉ Copy";
       }, 2000);
     });
   });
@@ -255,7 +255,7 @@ export async function renderLibrary(root: HTMLElement) {
   });
 
   root.querySelectorAll<HTMLButtonElement>("button.delete").forEach((btn) => {
-    armDelete(btn, "Delete", async () => {
+    armDelete(btn, "🗑 Delete", async () => {
       await api.deleteWorkout(btn.dataset.slug!);
       await renderLibrary(root);
     });
