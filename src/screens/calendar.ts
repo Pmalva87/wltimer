@@ -58,7 +58,6 @@ export async function renderCalendar(root: HTMLElement, dateArg: string | null) 
             : `<div class="actions">
                  <a class="btn primary" href="#/run/@${selected}:${i}">▶ Run</a>
                  <a class="btn" href="#/view/@${selected}:${i}">👁 View</a>
-                 <a class="btn" href="#/edit/@${selected}:${i}">Edit</a>
                  <button class="btn copy" data-i="${i}">⧉ Copy to clipboard</button>
                  <button class="btn promote" data-i="${i}">☆ Save to library</button>
                  <button class="btn move" data-i="${i}">⇄ Move</button>

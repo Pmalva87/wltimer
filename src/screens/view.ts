@@ -19,7 +19,7 @@ export async function renderView(root: HTMLElement, target: string) {
       ? ((await api.getDay(dayMatch[1]))[Number(dayMatch[2])]?.markdown ?? "")
       : await api.getSource(target);
   } catch (e) {
-    root.innerHTML = errorScreen(backHash, String(e));
+    root.innerHTML = errorScreen(backHash, editHash, String(e));
     return;
   }
 
@@ -30,6 +30,7 @@ export async function renderView(root: HTMLElement, target: string) {
     const errs = e as { line: number; message: string }[];
     root.innerHTML = errorScreen(
       backHash,
+      editHash,
       Array.isArray(errs) && errs[0] ? `line ${errs[0].line}: ${errs[0].message}` : String(e),
     );
     return;
@@ -80,12 +81,15 @@ function partCard(b: WorkoutView["blocks"][number], i: number): string {
     </section>`;
 }
 
-function errorScreen(backHash: string, message: string): string {
+/// The view is the only route to the editor, so a workout that will not parse
+/// must still offer Edit here — otherwise a broken file could never be fixed.
+function errorScreen(backHash: string, editHash: string, message: string): string {
   return `
     <div class="screen viewer">
       <header class="topbar">
         <a class="btn" href="${backHash}">‹ Back</a>
         <h1>Cannot show workout</h1>
+        <a class="btn primary" href="${editHash}">Edit</a>
       </header>
       <div class="view-scroll">
         <div class="editor-status invalid">${esc(message)}</div>

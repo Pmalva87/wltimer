@@ -104,7 +104,6 @@ export async function renderLibrary(root: HTMLElement) {
                            <div class="actions">
                              <a class="btn primary" href="#/run/${encodeURIComponent(w.slug)}">▶ Run</a>
                              <a class="btn" href="#/view/${encodeURIComponent(w.slug)}">👁 View</a>
-                             <a class="btn" href="#/edit/${encodeURIComponent(w.slug)}">Edit</a>
                              <button class="btn copy" data-slug="${esc(w.slug)}">⧉ Copy to clipboard</button>
                              <button class="btn dup" data-slug="${esc(w.slug)}">⊕ Duplicate</button>
                              <button class="btn danger delete" data-slug="${esc(w.slug)}">Delete</button>

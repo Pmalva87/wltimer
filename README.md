@@ -12,7 +12,8 @@ interchange format: upload a `.md` file to populate the builder, flip the
 "Markdown" toggle to edit the same workout as text, or Copy a workout's
 markdown to the clipboard to export it. Tapping a workout — in the library or on
 the calendar — opens a **read-only view** listing its parts, times and notes,
-with its id at the bottom; nothing there can be edited by accident.
+with its id at the top. Editing is reached from there rather than from the
+list, so it is never a mis-tap away.
 Notes are shown on screen while the
 part runs. Work and rest phases get distinct colors, with beeps + amber
 flashes at 3‑2‑1 before every transition, distinct sounds for work/rest
