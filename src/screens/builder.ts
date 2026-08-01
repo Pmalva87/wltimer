@@ -156,17 +156,40 @@ export async function renderBuilder(root: HTMLElement, slug: string | null, asTa
     location.hash = "#/run/draft";
   }
 
-  function stepper(id: string, value: string, step: number, minusLabel: string, plusLabel: string) {
+  type StepField = "intervals" | "work_secs" | "rest_secs" | "rest_after_secs";
+
+  /** Text shown between a stepper's buttons: rests read "none" at zero. */
+  function stepValue(b: Block, field: StepField): string {
+    if (field === "intervals") return String(b.intervals);
+    if (field === "work_secs") return fmtDuration(b.work_secs);
+    const v = b[field];
+    return v ? fmtDuration(v) : "none";
+  }
+
+  function stepper(i: number, field: StepField, step: number, minusLabel: string, plusLabel: string) {
     return `
-      <div class="stepper" data-id="${id}" data-step="${step}">
+      <div class="stepper" data-id="${i}.${field}" data-step="${step}">
         <button class="btn step">${minusLabel}</button>
-        <span class="quick-value">${value}</span>
+        <span class="quick-value">${stepValue(w.blocks[i], field)}</span>
         <button class="btn step plus">${plusLabel}</button>
       </div>`;
   }
 
+  function refreshTotal() {
+    const el = root.querySelector<HTMLElement>("#total");
+    if (el) {
+      el.textContent = `total ${fmtDuration(workoutTotalSecs(w))} (incl. ${PREPARE_SECS}s get-ready)`;
+    }
+  }
+
+  /**
+   * Full rebuild of the form. Only for structural changes (parts added or
+   * removed) — value edits patch in place so the view never jumps. The scroll
+   * offset is carried over so the user keeps looking at the same place.
+   */
   function renderForm() {
     const multi = w.blocks.length > 1;
+    const scrollTop = root.querySelector<HTMLElement>(".quick-form")?.scrollTop ?? 0;
     root.innerHTML = `
       <div class="screen builder">
         <header class="topbar">
@@ -189,21 +212,21 @@ export async function renderBuilder(root: HTMLElement, slug: string | null, asTa
               </div>
               <div class="quick-row">
                 <span class="quick-label">Intervals</span>
-                ${stepper(`${i}.intervals`, String(b.intervals), 1, "−", "+")}
+                ${stepper(i, "intervals", 1, "−", "+")}
               </div>
               <div class="quick-row">
                 <span class="quick-label">Work</span>
-                ${stepper(`${i}.work_secs`, fmtDuration(b.work_secs), 15, "−15s", "+15s")}
+                ${stepper(i, "work_secs", 5, "−5s", "+5s")}
               </div>
               <div class="quick-row">
                 <span class="quick-label">Rest</span>
-                ${stepper(`${i}.rest_secs`, b.rest_secs ? fmtDuration(b.rest_secs) : "none", 15, "−15s", "+15s")}
+                ${stepper(i, "rest_secs", 5, "−5s", "+5s")}
               </div>
               ${
                 i < w.blocks.length - 1
                   ? `<div class="quick-row">
                        <span class="quick-label">Rest after part</span>
-                       ${stepper(`${i}.rest_after_secs`, b.rest_after_secs ? fmtDuration(b.rest_after_secs) : "none", 15, "−15s", "+15s")}
+                       ${stepper(i, "rest_after_secs", 5, "−5s", "+5s")}
                      </div>`
                   : ""
               }
@@ -220,10 +243,12 @@ export async function renderBuilder(root: HTMLElement, slug: string | null, asTa
             <button class="btn" id="exportmd">⇩ Export .md</button>
           </div>
           <div id="status" class="editor-status"></div>
-          <div class="quick-total">total ${fmtDuration(workoutTotalSecs(w))} (incl. ${PREPARE_SECS}s get-ready)</div>
+          <div id="total" class="quick-total">total ${fmtDuration(workoutTotalSecs(w))} (incl. ${PREPARE_SECS}s get-ready)</div>
         </div>
         ${asTab ? tabBar("quick") : ""}
       </div>`;
+
+    root.querySelector<HTMLElement>(".quick-form")!.scrollTop = scrollTop;
 
     root.querySelector<HTMLInputElement>("#wname")!.addEventListener("input", (e) => {
       w.name = (e.target as HTMLInputElement).value;
@@ -253,18 +278,19 @@ export async function renderBuilder(root: HTMLElement, slug: string | null, asTa
     });
 
     root.querySelectorAll<HTMLElement>(".stepper").forEach((st) => {
-      const [idx, field] = st.dataset.id!.split(".") as [
-        string,
-        "intervals" | "work_secs" | "rest_secs" | "rest_after_secs",
-      ];
+      const [idx, field] = st.dataset.id!.split(".") as [string, StepField];
       const step = Number(st.dataset.step);
+      const out = st.querySelector<HTMLElement>(".quick-value")!;
       st.querySelectorAll<HTMLButtonElement>("button.step").forEach((btn) => {
         btn.addEventListener("click", () => {
           const b = w.blocks[Number(idx)];
           const delta = step * (btn.classList.contains("plus") ? 1 : -1);
-          const min = field === "intervals" ? 1 : field === "work_secs" ? 15 : 0;
+          const min = field === "intervals" ? 1 : field === "work_secs" ? 5 : 0;
           b[field] = Math.max(min, (b[field] ?? 0) + delta);
-          renderForm();
+          // Patch just this value and the total: rebuilding the form here
+          // would scroll the pane back to the top mid-edit.
+          out.textContent = stepValue(b, field);
+          refreshTotal();
         });
       });
     });
