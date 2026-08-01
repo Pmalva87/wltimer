@@ -123,7 +123,7 @@ impl Store {
             by_slug.insert(slug, summary);
         }
         let mut out: Vec<WorkoutSummary> = by_slug.into_values().collect();
-        out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        out.sort_by_key(|s| s.name.to_lowercase());
         out
     }
 

@@ -49,7 +49,13 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev
 
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned rather than `stable` so a new Rust release can't turn this red on
+      # its own schedule: clippy gains lints every six weeks, and CI running a
+      # newer toolchain than the developer means "green locally" stops meaning
+      # anything. Deliberately NOT a rust-toolchain.toml — that would apply
+      # locally too and strand the Android targets installed against `stable`.
+      # Bump this by hand, together with a local `rustup update`.
+      - uses: dtolnay/rust-toolchain@1.93.1
         with:
           components: clippy
 
