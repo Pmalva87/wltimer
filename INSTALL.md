@@ -56,17 +56,56 @@ adb install -r src-tauri/gen/android/app/build/outputs/apk/universal/release/wlt
 
 ### Over Wi-Fi instead of a cable
 
-Android 11+: **Developer options → Wireless debugging → Pair device with
-pairing code**, then on the computer:
+No cable needed, and it works when USB doesn't. Phone and computer must be on
+the same Wi-Fi. Requires Android 11+.
+
+**The one thing to get right: there are two different ports**, on two different
+screens, and mixing them up is the usual failure.
+
+1. On the phone: **Developer options → Wireless debugging**, turn it on. The
+   main screen shows **IP address & Port** — e.g. `192.168.0.92:34949`. That is
+   the *connect* port.
+2. Tap **Pair device with pairing code**. The dialog that opens shows a
+   *different* port — e.g. `192.168.0.92:39407` — and a six-digit code. Those
+   are the *pairing* values, and both are single-use.
+3. With the pairing dialog still open:
 
 ```sh
-adb pair <phone-ip>:<pairing-port>     # enter the 6-digit code shown on screen
-adb connect <phone-ip>:<debug-port>    # the port on the Wireless debugging screen
-adb install -r .../wltimer-0.0.1.apk
+adb pair 192.168.0.92:39407 444741      # dialog's port + the 6-digit code
+# → Successfully paired to 192.168.0.92:39407 [guid=adb-XXXXXXXX-XXXXXX]
 ```
 
-The pairing port and the connect port are different numbers; both are shown on
-the phone.
+Passing the code as a second argument avoids `adb`'s interactive prompt.
+
+4. Close the dialog and connect using the port from the **main** Wireless
+   debugging screen:
+
+```sh
+adb connect 192.168.0.92:34949
+adb devices -l                          # should show the phone as "device"
+adb install -r src-tauri/gen/android/app/build/outputs/apk/universal/release/wltimer-0.0.1.apk
+```
+
+Notes from doing this in anger:
+
+- Pairing is **persistent**; the connection is not. After a reboot, a Wi-Fi
+  change, or leaving wireless debugging off for a while, just re-run `adb
+  connect <ip>:<port>` — no re-pairing. The port usually changes, so re-read it
+  off the phone each time.
+- `adb mdns services` is supposed to auto-discover paired devices, but often
+  returns an empty list (mDNS blocked on the network, or the adb build has the
+  backend disabled). Not a problem — connect manually as above.
+- A "device offline" or connection refused after a while means the phone
+  dropped the session; `adb disconnect && adb connect <ip>:<port>` fixes it.
+
+### Confirm what landed
+
+```sh
+adb shell dumpsys package com.pcorreia.wltimer | grep -E "versionName|InstallTime"
+```
+
+If `firstInstallTime` is older than `lastUpdateTime`, it upgraded in place and
+your data is intact. Equal timestamps mean it was a fresh install.
 
 ## 2b. Install without a computer
 
@@ -114,7 +153,7 @@ Android's app settings erases it too.
 
 | Symptom | Cause / fix |
 | --- | --- |
-| `adb devices` shows nothing | Cable is charge-only, or USB debugging is off. Try another cable/port; re-check developer options. |
+| `adb devices` shows nothing | First find out whether the *kernel* sees the phone: `lsusb`, or `for d in /sys/bus/usb/devices/*/; do cat $d/product 2>/dev/null; done`. If the phone isn't listed there, adb is not the problem — it's a charge-only cable (most common), a dead port, or the phone's USB mode. Pull down the notification shade and set the USB notification to **File transfer**. If the phone *is* listed, restart the server: `adb kill-server && adb start-server`. Or skip USB entirely and [use Wi-Fi](#over-wi-fi-instead-of-a-cable). |
 | Device shows as `unauthorized` | The *Allow USB debugging* prompt wasn't accepted. Unplug, replug, watch the phone screen. Revoke via **Developer options → Revoke USB debugging authorisations** to force the prompt again. |
 | `INSTALL_FAILED_UPDATE_INCOMPATIBLE` | Different signing key — uninstall first (see above). |
 | `INSTALL_FAILED_USER_RESTRICTED` | MIUI/vendor block: enable **Install via USB** in developer options, and disable MIUI Optimization. |
