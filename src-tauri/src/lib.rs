@@ -40,6 +40,7 @@ pub fn run() {
             commands::update_day_entry,
             commands::delete_day_entry,
             commands::move_day_entry,
+            commands::repeat_day_entry,
             commands::promote_day_entry,
             commands::parse_plan_preview,
             commands::list_plans,

@@ -724,6 +724,46 @@ details.notes textarea {
   opacity: 0.6;
 }
 
+/* The name lives in the scroll body, not the topbar, so Back has to hold the
+   left edge on its own and push Edit/Run to the right. */
+.viewer .topbar > .btn:first-child {
+  margin-right: auto;
+}
+
+.view-title {
+  font-size: 1.4rem;
+  font-weight: 700;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.view-day {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.75rem;
+  margin-top: -0.35rem;
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
+.view-mark {
+  border-radius: 999px;
+  padding: 0.1rem 0.6rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.view-mark.done {
+  background: #14532d;
+  color: #4ade80;
+}
+
+.view-mark.planned {
+  background: #1e293b;
+  color: var(--muted);
+}
+
 .viewer .view-scroll {
   flex: 1;
   overflow-y: auto;

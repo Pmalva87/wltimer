@@ -331,6 +331,29 @@ pub fn move_day_entry(
     state.days.move_entry(&from_date, index, &to_date)
 }
 
+/// Repeat a day entry on another date (used by Re-Run on a finished workout).
+/// The copy mints its own id: the entry it came from is a finished occurrence
+/// that must keep standing on its own day, and two entries sharing an id would
+/// make a later plan sync unable to tell them apart. Provenance carries over.
+#[tauri::command]
+pub fn repeat_day_entry(
+    state: State<AppState>,
+    date: String,
+    index: usize,
+    to_date: String,
+) -> Result<usize, String> {
+    check_date(&date)?;
+    check_date(&to_date)?;
+    let entries = state.days.load(&date);
+    let entry = entries
+        .get(index)
+        .ok_or_else(|| format!("no entry {index} on {date}"))?;
+    let (source, _) = ids::with_new_id(&entry.markdown);
+    state
+        .days
+        .add(&to_date, planned_entry(source, entry.source_slug.clone()))
+}
+
 /// Save a day entry's workout into the library (explicit opt-in).
 #[tauri::command]
 pub fn promote_day_entry(

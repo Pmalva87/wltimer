@@ -1,4 +1,11 @@
-import { api, fmtDuration, PREPARE_SECS, type WorkoutView } from "../api";
+import {
+  api,
+  fmtDuration,
+  todayStr,
+  PREPARE_SECS,
+  type DayEntryInfo,
+  type WorkoutView,
+} from "../api";
 import { esc } from "./library";
 
 /**
@@ -14,10 +21,14 @@ export async function renderView(root: HTMLElement, target: string) {
   const editHash = dayMatch ? `#/edit/@${dayMatch[1]}:${dayMatch[2]}` : `#/edit/${encodeURIComponent(target)}`;
 
   let source: string;
+  let entry: DayEntryInfo | undefined;
   try {
-    source = dayMatch
-      ? ((await api.getDay(dayMatch[1]))[Number(dayMatch[2])]?.markdown ?? "")
-      : await api.getSource(target);
+    if (dayMatch) {
+      entry = (await api.getDay(dayMatch[1]))[Number(dayMatch[2])];
+      source = entry?.markdown ?? "";
+    } else {
+      source = await api.getSource(target);
+    }
   } catch (e) {
     root.innerHTML = errorScreen(backHash, editHash, String(e));
     return;
@@ -36,15 +47,23 @@ export async function renderView(root: HTMLElement, target: string) {
     return;
   }
 
+  // A finished workout is never re-run in place: Re-Run copies it onto today,
+  // so the record of the day it was actually done stays untouched.
+  const done = entry?.status === "done";
   root.innerHTML = `
     <div class="screen viewer">
       <header class="topbar">
         <a class="btn" href="${backHash}">‹ Back</a>
-        <h1>${esc(view.name)}</h1>
         <a class="btn" href="${editHash}">Edit</a>
-        <a class="btn primary" href="${runHash}">▶ Run</a>
+        ${
+          done
+            ? `<button class="btn primary" id="rerun">↻ Re-Run</button>`
+            : `<a class="btn primary" href="${runHash}">▶ Run</a>`
+        }
       </header>
       <div class="view-scroll">
+        <h1 class="view-title">${esc(view.name)}</h1>
+        ${dayMatch ? dayLine(dayMatch[1], entry) : ""}
         <div class="view-id">
           <span class="view-id-label">ID</span>
           <code>${view.id ? esc(view.id) : "none yet — saving this workout adds one"}</code>
@@ -57,6 +76,49 @@ export async function renderView(root: HTMLElement, target: string) {
         ${view.blocks.map(partCard).join("")}
       </div>
     </div>`;
+
+  root.querySelector<HTMLButtonElement>("#rerun")?.addEventListener("click", async (ev) => {
+    const btn = ev.currentTarget as HTMLButtonElement;
+    btn.disabled = true;
+    const today = todayStr();
+    try {
+      const idx = await api.repeatDayEntry(dayMatch![1], Number(dayMatch![2]), today);
+      location.hash = `#/run/@${today}:${idx}`;
+    } catch (e) {
+      btn.disabled = false;
+      const scroll = root.querySelector(".view-scroll");
+      const msg = document.createElement("div");
+      msg.className = "editor-status invalid";
+      msg.textContent = `Could not schedule the repeat: ${String(e)}`;
+      scroll?.prepend(msg);
+    }
+  });
+}
+
+/** The date the workout sits on, plus whether it has already been done. Only
+ *  calendar entries have either — a library template is undated by nature. */
+function dayLine(date: string, entry?: DayEntryInfo): string {
+  const at = entry?.completed_at
+    ? ` at ${new Date(entry.completed_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+    : "";
+  const mark =
+    entry?.status === "done"
+      ? `<span class="view-mark done">✓ Done${at}</span>`
+      : `<span class="view-mark planned">⧗ Planned</span>`;
+  return `<div class="view-day"><span class="view-date">📅 ${fmtDay(date)}</span>${mark}</div>`;
+}
+
+/** `2026-08-04` → `Tue, 4 Aug 2026`. Split by hand rather than
+ *  `new Date(date)`, which reads a bare date as UTC and can land on the day
+ *  before in western timezones. */
+function fmtDay(date: string): string {
+  const [y, m, d] = date.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString([], {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
 }
 
 function partCard(b: WorkoutView["blocks"][number], i: number): string {

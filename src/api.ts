@@ -182,6 +182,10 @@ export const api = {
     invoke<void>("delete_day_entry", { date, index }),
   moveDayEntry: (fromDate: string, index: number, toDate: string) =>
     invoke<void>("move_day_entry", { fromDate, index, toDate }),
+  /** Copy an entry onto `toDate` as a fresh planned occurrence with its own
+   *  id. Returns the new entry's index on that day. */
+  repeatDayEntry: (date: string, index: number, toDate: string) =>
+    invoke<number>("repeat_day_entry", { date, index, toDate }),
   promoteDayEntry: (date: string, index: number) =>
     invoke<WorkoutSummary>("promote_day_entry", { date, index }),
   parsePlanPreview: (source: string) =>
