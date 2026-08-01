@@ -36,6 +36,25 @@ export interface Workout {
   blocks: Block[];
 }
 
+export interface ViewBlock {
+  name: string;
+  color: string | null;
+  intervals: number;
+  work_secs: number;
+  rest_secs: number | null;
+  rest_after_secs: number | null;
+  /** Work + between-interval rest for this part, excluding the rest after it. */
+  block_secs: number;
+  description_html: string;
+}
+
+export interface WorkoutView {
+  id: string | null;
+  name: string;
+  total_secs: number;
+  blocks: ViewBlock[];
+}
+
 export type ParseFull =
   | { status: "ok"; workout: Workout }
   | { status: "err"; errors: ParseError[] };
@@ -138,7 +157,10 @@ export const api = {
   getSource: (slug: string) => invoke<string>("get_workout_source", { slug }),
   saveWorkout: (source: string, prevSlug: string | null) =>
     invoke<WorkoutSummary>("save_workout", { source, prevSlug }),
+  duplicateWorkout: (slug: string) =>
+    invoke<WorkoutSummary>("duplicate_workout", { slug }),
   deleteWorkout: (slug: string) => invoke<void>("delete_workout", { slug }),
+  viewWorkout: (source: string) => invoke<WorkoutView>("view_workout", { source }),
   parsePreview: (source: string) => invoke<Preview>("parse_preview", { source }),
   startWorkout: (slug: string) =>
     invoke<RunPlan>("start_workout", { slug, today: todayStr() }),

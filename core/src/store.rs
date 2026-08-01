@@ -320,6 +320,26 @@ mod tests {
     }
 
     #[test]
+    fn an_explicit_copy_needs_a_fresh_id_to_become_a_second_workout() {
+        // What the Duplicate button does. Re-saving the source as-is would
+        // match the original by id and update it, so the copy must be minted a
+        // new identity first — this pins that contract.
+        let s = temp_store("copy");
+        let first = s.save("# Squats\n\n## A\n- work: 30\n", None).unwrap();
+        let source = s.read_source(&first.slug).unwrap();
+
+        // As-is: an update, not a copy.
+        s.save(&source, None).unwrap();
+        assert_eq!(s.list().len(), 1);
+
+        // With a fresh id: a genuine second workout.
+        let copy = s.save(&ids::with_new_id(&source).0, None).unwrap();
+        assert_eq!(copy.slug, "squats-2");
+        assert_eq!(copy.name, "Squats (2)");
+        assert_eq!(s.list().len(), 2);
+    }
+
+    #[test]
     fn an_id_belonging_to_another_workout_is_not_stolen() {
         // Pasting one workout's markdown into another's editor must not leave
         // two stored files claiming the same identity.

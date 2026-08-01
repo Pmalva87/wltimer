@@ -10,7 +10,10 @@ times/intervals, optional per-part names and notes/cues) which can START a
 one-off timer immediately or Save to the library. Markdown is the storage and
 interchange format: upload a `.md` file to populate the builder, flip the
 "Markdown" toggle to edit the same workout as text, or Copy a workout's
-markdown to the clipboard to export it. Notes are shown on screen while the
+markdown to the clipboard to export it. Tapping a workout — in the library or on
+the calendar — opens a **read-only view** listing its parts, times and notes,
+with its id at the bottom; nothing there can be edited by accident.
+Notes are shown on screen while the
 part runs. Work and rest phases get distinct colors, with beeps + amber
 flashes at 3‑2‑1 before every transition, distinct sounds for work/rest
 starts, and a large whole-workout countdown at the top of the run screen.

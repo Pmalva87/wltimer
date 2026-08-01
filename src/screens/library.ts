@@ -97,12 +97,13 @@ export async function renderLibrary(root: HTMLElement) {
                            </div>
                          </li>`
                       : `<li class="workout" data-i="${i}">
-                           <div class="info">
+                           <a class="info tappable" href="#/view/${encodeURIComponent(w.slug)}">
                              <span class="name">${esc(w.name)}</span>
                              <span class="meta">${w.block_count} exercise${w.block_count === 1 ? "" : "s"} · ${fmtDuration(w.total_secs)}</span>
-                           </div>
+                           </a>
                            <div class="actions">
                              <a class="btn primary" href="#/run/${encodeURIComponent(w.slug)}">▶ Run</a>
+                             <a class="btn" href="#/view/${encodeURIComponent(w.slug)}">👁 View</a>
                              <a class="btn" href="#/edit/${encodeURIComponent(w.slug)}">Edit</a>
                              <button class="btn copy" data-slug="${esc(w.slug)}">⧉ Copy to clipboard</button>
                              <button class="btn dup" data-slug="${esc(w.slug)}">⊕ Duplicate</button>
@@ -241,12 +242,16 @@ export async function renderLibrary(root: HTMLElement) {
     });
   });
 
-  // Duplicate: saving without prev_slug lets the store add the "(n)" counter.
+  // Duplicate mints a new id backend-side: re-saving the source as-is would
+  // match the original by id and update it instead of copying it.
   root.querySelectorAll<HTMLButtonElement>("button.dup").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      const source = await api.getSource(btn.dataset.slug!);
-      await api.saveWorkout(source, null);
-      await renderLibrary(root);
+      try {
+        await api.duplicateWorkout(btn.dataset.slug!);
+        await renderLibrary(root);
+      } catch (e) {
+        showParseErrors(e);
+      }
     });
   });
 

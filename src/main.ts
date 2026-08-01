@@ -3,6 +3,7 @@ import { renderLibrary } from "./screens/library";
 import { renderBuilder } from "./screens/builder";
 import { renderRun } from "./screens/run";
 import { renderCalendar } from "./screens/calendar";
+import { renderView } from "./screens/view";
 import { lastTab, rememberTab } from "./tabs";
 
 type Cleanup = (() => void) | void;
@@ -29,6 +30,8 @@ async function route() {
   } else if (screen === "calendar") {
     rememberTab("#/calendar");
     cleanup = await renderCalendar(app, slug);
+  } else if (screen === "view" && slug) {
+    cleanup = await renderView(app, slug);
   } else if (screen === "run" && slug) {
     cleanup = await renderRun(app, slug);
   } else {

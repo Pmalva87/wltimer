@@ -710,3 +710,144 @@ details.notes textarea {
     opacity: 0;
   }
 }
+
+/* ---- read-only workout view ---- */
+
+/* The name/meta block of a list row doubles as the link into the view. */
+.info.tappable {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
+.info.tappable:active {
+  opacity: 0.6;
+}
+
+.viewer .view-scroll {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+  max-width: 32rem;
+  width: 100%;
+  margin: 0 auto;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.view-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  align-items: baseline;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.view-summary .muted {
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 400;
+}
+
+.view-part {
+  background: var(--panel);
+  border-radius: 0.9rem;
+  border-left: 4px solid #334155;
+  padding: 0.9rem 1rem;
+}
+
+.view-part-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.6rem;
+}
+
+.view-part-head h2 {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.view-part-total {
+  color: var(--muted);
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.view-rows {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.5rem;
+}
+
+.view-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  background: #00000030;
+  border-radius: 0.5rem;
+  padding: 0.3rem 0.6rem;
+}
+
+.view-row dt {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.view-row dd {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.view-notes {
+  margin-top: 0.75rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid #33415580;
+  font-size: 0.95rem;
+  line-height: 1.55;
+}
+
+.view-notes p,
+.view-notes ul,
+.view-notes ol {
+  margin-bottom: 0.5rem;
+}
+
+.view-notes ul,
+.view-notes ol {
+  padding-left: 1.2rem;
+}
+
+.view-notes :last-child {
+  margin-bottom: 0;
+}
+
+.view-id {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px dashed #334155;
+  border-radius: 0.8rem;
+}
+
+.view-id-label {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.view-id code {
+  flex: 1;
+  min-width: 12rem;
+  font-family: ui-monospace, "Cascadia Mono", Menlo, monospace;
+  font-size: 0.8rem;
+  color: var(--muted);
+  word-break: break-all;
+}

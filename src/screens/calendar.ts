@@ -44,10 +44,10 @@ export async function renderCalendar(root: HTMLElement, dateArg: string | null) 
     const duration = totalSecs != null ? ` · ${fmtDuration(totalSecs)}` : "";
     return `
       <div class="day-entry ${done ? "done" : ""}">
-        <div class="info">
+        <a class="info tappable" href="#/view/@${selected}:${i}">
           <span class="name">${esc(e.name)}</span>
           <span class="meta">${done ? `✓ done${when}` : "⧗ planned"}${duration}${e.source_slug ? ` · from library` : ""}${e.source_plan ? ` · plan: ${esc(e.source_plan)}` : ""}</span>
-        </div>
+        </a>
         ${
           movingIdx === i
             ? `<div class="move-row">
@@ -57,6 +57,7 @@ export async function renderCalendar(root: HTMLElement, dateArg: string | null) 
                </div>`
             : `<div class="actions">
                  <a class="btn primary" href="#/run/@${selected}:${i}">▶ Run</a>
+                 <a class="btn" href="#/view/@${selected}:${i}">👁 View</a>
                  <a class="btn" href="#/edit/@${selected}:${i}">Edit</a>
                  <button class="btn copy" data-i="${i}">⧉ Copy to clipboard</button>
                  <button class="btn promote" data-i="${i}">☆ Save to library</button>

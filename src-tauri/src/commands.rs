@@ -126,6 +126,24 @@ pub fn save_workout(
     state.store.save(&source, prev_slug.as_deref())
 }
 
+/// Copy a library workout into a second, independent workout.
+///
+/// Needs its own command because saving a document that already carries an id
+/// *updates* that workout — which is exactly what makes re-import work, and
+/// exactly why a deliberate copy has to mint a new identity first.
+#[tauri::command]
+pub fn duplicate_workout(
+    state: State<AppState>,
+    slug: String,
+) -> Result<WorkoutSummary, Vec<ParseError>> {
+    let source = state
+        .store
+        .read_source(&slug)
+        .map_err(|message| vec![ParseError { line: 1, message }])?;
+    let (source, _) = ids::with_new_id(&source);
+    state.store.save(&source, None)
+}
+
 #[tauri::command]
 pub fn delete_workout(state: State<AppState>, slug: String) -> Result<(), String> {
     state.store.delete(&slug)
@@ -156,6 +174,56 @@ pub fn parse_full(source: String) -> ParseFull {
 #[tauri::command]
 pub fn serialize_workout(workout: Workout) -> String {
     parser::workout_to_markdown(&workout)
+}
+
+/// Everything the read-only view screen shows. Separate from `RunPlan` because
+/// asking to *look* at a workout must not start one — `start_workout` sets the
+/// run origin, which decides what gets written to the calendar when a run ends.
+#[derive(Serialize)]
+pub struct WorkoutView {
+    pub id: Option<String>,
+    pub name: String,
+    pub total_secs: u32,
+    pub blocks: Vec<ViewBlock>,
+}
+
+#[derive(Serialize)]
+pub struct ViewBlock {
+    pub name: String,
+    pub color: Option<String>,
+    pub intervals: u32,
+    pub work_secs: u32,
+    pub rest_secs: Option<u32>,
+    pub rest_after_secs: Option<u32>,
+    pub block_secs: u32,
+    pub description_html: String,
+}
+
+#[tauri::command]
+pub fn view_workout(source: String) -> Result<WorkoutView, Vec<ParseError>> {
+    let w = parser::parse_workout(&source)?;
+    let last = w.blocks.len().saturating_sub(1);
+    Ok(WorkoutView {
+        id: w.id.clone(),
+        name: w.name.clone(),
+        total_secs: w.total_secs(),
+        blocks: w
+            .blocks
+            .iter()
+            .enumerate()
+            .map(|(i, b)| ViewBlock {
+                name: b.name.clone(),
+                color: b.color.clone(),
+                intervals: b.intervals,
+                work_secs: b.work_secs,
+                rest_secs: b.rest_secs,
+                rest_after_secs: if i < last { b.rest_after_secs } else { None },
+                block_secs: b.intervals * b.work_secs
+                    + b.rest_secs.unwrap_or(0) * b.intervals.saturating_sub(1),
+                description_html: parser::render_markdown(&b.description_md),
+            })
+            .collect(),
+    })
 }
 
 // ---- calendar ----
