@@ -49,7 +49,7 @@ export async function renderBuilder(root: HTMLElement, slug: string | null, asTa
   let dayIndex = dayMatch?.[2] != null ? Number(dayMatch[2]) : null;
   const backHash = dayDate ? `#/calendar/${dayDate}` : "#/library";
 
-  let w: Workout = { name: "", blocks: [defaultBlock()] };
+  let w: Workout = { id: null, name: "", blocks: [defaultBlock()] };
   let loadErrors: ParseError[] = [];
   const openNotes = new Set<number>();
 
@@ -107,6 +107,9 @@ export async function renderBuilder(root: HTMLElement, slug: string | null, asTa
   function withDefaults(): Workout {
     const last = w.blocks.length - 1;
     return {
+      // Carried through deliberately: without it every save would look like a
+      // new workout and the backend would mint a fresh id each time.
+      id: w.id,
       name: w.name.trim() || (dayDate ? "Workout" : "Quick Timer"),
       blocks: w.blocks.map((b, i) => ({
         ...b,

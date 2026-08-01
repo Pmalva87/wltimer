@@ -19,6 +19,7 @@ starts, and a large whole-workout countdown at the top of the run screen.
 
 ```markdown
 # Monday Squats
+- id: 9f2c8e1a-4b7d-4c2e-9a11-6f0d3e5b8c74
 
 ## Back Squat
 - intervals: 5
@@ -35,10 +36,32 @@ Cues: brace hard, hit depth, drive up fast.
 ```
 
 - `# Title` — workout name (required)
+- `- id:` — a UUID under the title identifying this workout. Optional in a file
+  you write by hand; the app adds one when it saves. See [Identity](#identity).
 - `## Heading` — starts an exercise block (at least one required)
 - Bullet params per block: `work` (required), `intervals` (default 1), `rest`,
   `rest after`, `color`. Times are seconds (`90`) or `M:SS` (`1:30`).
 - Everything else in the block is free markdown shown during the exercise.
+
+## Identity
+
+Every stored workout carries a UUID in its own markdown, so identity travels
+with the file rather than with its filename or its position in a list:
+
+- Re-importing a workout you exported and edited elsewhere **updates the
+  original** instead of adding "Squats (2)". A file with no id is treated as a
+  new workout, so hand-written `.md` uploads still work as before.
+- Plan days carry one id each, inherited by the calendar entry they schedule.
+  Re-syncing a plan matches on that id, so it updates its days rather than
+  duplicating them — even if you re-upload the plan file as a new plan.
+- **A workout you have already finished is never replaced or duplicated by a
+  sync.** The done entry stands; no planned copy appears beside it.
+- Copies get their own identity: scheduling a library template on a date,
+  promoting a day entry into the library, and recording a finished run all mint
+  a new id, so no two objects ever claim the same one.
+
+Workouts, plans and calendar entries saved before ids existed are given one
+automatically the first time the app opens after upgrading.
 
 ## Calendar
 

@@ -28,6 +28,10 @@ export interface Block {
 }
 
 export interface Workout {
+  /** Stable id carried in the workout's markdown; the backend mints one on
+   *  save. Must be preserved across edits — dropping it makes the next save
+   *  look like a brand-new workout. */
+  id: string | null;
   name: string;
   blocks: Block[];
 }
