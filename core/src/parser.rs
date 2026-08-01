@@ -1,3 +1,4 @@
+use crate::ids;
 use crate::model::{Block, Workout};
 use serde::Serialize;
 
@@ -24,6 +25,9 @@ fn fmt_secs(secs: u32) -> String {
 /// equal workout (round-trip).
 pub fn workout_to_markdown(w: &Workout) -> String {
     let mut out = format!("# {}\n", w.name);
+    if let Some(id) = &w.id {
+        out.push_str(&format!("- id: {id}\n"));
+    }
     for b in &w.blocks {
         out.push_str(&format!("\n## {}\n", b.name));
         out.push_str(&format!("- intervals: {}\n", b.intervals));
@@ -183,6 +187,7 @@ const PARAM_KEYS: [&str; 5] = ["intervals", "work", "rest", "rest after", "color
 pub fn parse_workout(src: &str) -> Result<Workout, Vec<ParseError>> {
     let mut errors: Vec<ParseError> = Vec::new();
     let mut name: Option<String> = None;
+    let mut id: Option<String> = None;
     let mut builders: Vec<BlockBuilder> = Vec::new();
 
     for (i, raw) in src.lines().enumerate() {
@@ -200,21 +205,30 @@ pub fn parse_workout(src: &str) -> Result<Workout, Vec<ParseError>> {
             } else {
                 errors.push(err(line_no, "unexpected extra '#' title — use '## Name' for exercise blocks"));
             }
+        } else if builders.is_empty() {
+            // Preamble, between the title and the first block. The document id
+            // is the only thing recognised here; everything else stays ignored.
+            if let Some((key, val)) = ids::bullet(trimmed) {
+                if key == "id" {
+                    if id.is_some() {
+                        errors.push(err(line_no, "duplicate 'id'"));
+                    } else if ids::valid_uuid(val) {
+                        id = Some(val.to_string());
+                    } else {
+                        errors.push(err(line_no, format!("invalid id '{val}' — expected a UUID")));
+                    }
+                }
+            }
         } else if let Some(b) = builders.last_mut() {
-            let bullet = trimmed
-                .strip_prefix("- ")
-                .or_else(|| trimmed.strip_prefix("* "));
-            if let Some((key, val)) = bullet.and_then(|rest| rest.split_once(':')) {
-                let key = key.trim().to_lowercase().replace(['-', '_'], " ");
+            if let Some((key, val)) = ids::bullet(trimmed) {
                 if PARAM_KEYS.contains(&key.as_str()) {
-                    b.set_param(&key, val.trim(), line_no, &mut errors);
+                    b.set_param(&key, val, line_no, &mut errors);
                     continue;
                 }
             }
             b.description.push_str(raw);
             b.description.push('\n');
         }
-        // Lines before the first block (other than the title) are ignored.
     }
 
     let name = match name {
@@ -230,7 +244,7 @@ pub fn parse_workout(src: &str) -> Result<Workout, Vec<ParseError>> {
     let blocks: Vec<Block> = builders.into_iter().filter_map(|b| b.finish(&mut errors)).collect();
 
     if errors.is_empty() {
-        Ok(Workout { name, blocks })
+        Ok(Workout { id, name, blocks })
     } else {
         errors.sort_by_key(|e| e.line);
         Err(errors)
@@ -257,6 +271,50 @@ Cues: brace hard, hit depth, drive up fast.
 - intervals: 3
 - work: 90
 ";
+
+    const UUID: &str = "9f2c8e1a-4b7d-4c2e-9a11-6f0d3e5b8c74";
+
+    #[test]
+    fn reads_the_document_id_from_the_preamble() {
+        let w = parse_workout(&format!("# W\n- id: {UUID}\n\n## A\n- work: 30\n")).unwrap();
+        assert_eq!(w.id.as_deref(), Some(UUID));
+    }
+
+    #[test]
+    fn id_is_optional() {
+        assert_eq!(parse_workout("# W\n\n## A\n- work: 30\n").unwrap().id, None);
+    }
+
+    #[test]
+    fn malformed_id_is_an_error() {
+        let errs = parse_workout("# W\n- id: nope\n\n## A\n- work: 30\n").unwrap_err();
+        assert_eq!(errs[0].line, 2);
+        assert!(errs[0].message.contains("invalid id"), "{}", errs[0].message);
+    }
+
+    #[test]
+    fn duplicate_id_is_an_error() {
+        let src = format!("# W\n- id: {UUID}\n- id: {UUID}\n\n## A\n- work: 30\n");
+        let errs = parse_workout(&src).unwrap_err();
+        assert!(errs[0].message.contains("duplicate 'id'"), "{}", errs[0].message);
+    }
+
+    #[test]
+    fn an_id_inside_a_block_stays_prose() {
+        // Same rule as every other unrecognised bullet: identity is a preamble
+        // param, so this must not be mistaken for the document id.
+        let w = parse_workout(&format!("# W\n\n## A\n- work: 30\n- id: {UUID}\n")).unwrap();
+        assert_eq!(w.id, None);
+        assert!(w.blocks[0].description_md.contains("- id:"));
+    }
+
+    #[test]
+    fn serializer_round_trips_the_id() {
+        let w = parse_workout(&format!("# W\n- id: {UUID}\n\n## A\n- work: 1:30\n")).unwrap();
+        let md = workout_to_markdown(&w);
+        assert!(md.starts_with(&format!("# W\n- id: {UUID}\n")), "{md}");
+        assert_eq!(parse_workout(&md).unwrap(), w);
+    }
 
     #[test]
     fn parses_full_document() {

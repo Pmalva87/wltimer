@@ -5,6 +5,12 @@ pub const PREPARE_SECS: u32 = 10;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Workout {
+    /// Stable UUID identifying this workout document, carried in the markdown
+    /// as `- id:` under the title. `None` only for a document that has not
+    /// been through a store yet — everything written to disk has one, so
+    /// re-imports and plan syncs can match a workout instead of copying it.
+    #[serde(default)]
+    pub id: Option<String>,
     pub name: String,
     pub blocks: Vec<Block>,
 }
@@ -111,6 +117,7 @@ mod tests {
     #[test]
     fn flatten_single_block() {
         let w = Workout {
+            id: None,
             name: "w".into(),
             blocks: vec![block(3, 60, Some(30), Some(120))],
         };
@@ -132,6 +139,7 @@ mod tests {
     #[test]
     fn flatten_two_blocks_with_block_rest() {
         let w = Workout {
+            id: None,
             name: "w".into(),
             blocks: vec![block(2, 60, None, Some(90)), block(1, 45, None, Some(30))],
         };
@@ -152,6 +160,7 @@ mod tests {
     #[test]
     fn zero_rest_is_skipped() {
         let w = Workout {
+            id: None,
             name: "w".into(),
             blocks: vec![block(2, 60, Some(0), None)],
         };

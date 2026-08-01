@@ -224,6 +224,7 @@ mod tests {
 
     fn workout() -> Workout {
         Workout {
+            id: None,
             name: "w".into(),
             blocks: vec![
                 Block {
