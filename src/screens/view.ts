@@ -1,5 +1,4 @@
 import { api, fmtDuration, PREPARE_SECS, type WorkoutView } from "../api";
-import { copyText } from "../clipboard";
 import { esc } from "./library";
 
 /**
@@ -45,31 +44,18 @@ export async function renderView(root: HTMLElement, target: string) {
         <a class="btn primary" href="${runHash}">▶ Run</a>
       </header>
       <div class="view-scroll">
+        <div class="view-id">
+          <span class="view-id-label">ID</span>
+          <code>${view.id ? esc(view.id) : "none yet — saving this workout adds one"}</code>
+        </div>
         <div class="view-summary">
           <span>${view.blocks.length} part${view.blocks.length === 1 ? "" : "s"}</span>
           <span>${fmtDuration(view.total_secs)} total</span>
           <span class="muted">incl. ${PREPARE_SECS}s get-ready</span>
         </div>
         ${view.blocks.map(partCard).join("")}
-        ${
-          view.id
-            ? `<div class="view-id">
-                 <span class="view-id-label">Workout ID</span>
-                 <code id="wid">${esc(view.id)}</code>
-                 <button class="btn" id="copyid">⧉ Copy</button>
-               </div>`
-            : `<div class="view-id"><span class="view-id-label">No ID yet — saving this workout adds one.</span></div>`
-        }
       </div>
     </div>`;
-
-  root.querySelector("#copyid")?.addEventListener("click", async (ev) => {
-    const btn = ev.currentTarget as HTMLButtonElement;
-    btn.textContent = (await copyText(view.id!)) ? "✓ Copied" : "Copy failed";
-    setTimeout(() => {
-      btn.textContent = "⧉ Copy";
-    }, 2000);
-  });
 }
 
 function partCard(b: WorkoutView["blocks"][number], i: number): string {

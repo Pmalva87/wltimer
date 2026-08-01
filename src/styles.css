@@ -829,13 +829,12 @@ details.notes textarea {
 
 .view-id {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   flex-wrap: wrap;
   gap: 0.5rem;
-  margin-top: 0.25rem;
-  padding: 0.7rem 0.9rem;
-  border: 1px dashed #334155;
-  border-radius: 0.8rem;
+  padding: 0.5rem 0.75rem;
+  background: #00000030;
+  border-radius: 0.6rem;
 }
 
 .view-id-label {
@@ -844,8 +843,6 @@ details.notes textarea {
 }
 
 .view-id code {
-  flex: 1;
-  min-width: 12rem;
   font-family: ui-monospace, "Cascadia Mono", Menlo, monospace;
   font-size: 0.8rem;
   color: var(--muted);
