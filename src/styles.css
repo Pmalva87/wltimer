@@ -651,8 +651,9 @@ details.notes textarea {
   margin-bottom: 0.4rem;
 }
 
-/* The next part's cues, riding above the current ones on the last interval.
-   Boxed and brighter, because it is the thing being looked for. */
+/* The next part's cues, riding above the current ones through rests and the
+   last interval. Boxed and brighter, because it is the thing being looked
+   for. */
 .up-next {
   background: #ffffff1a;
   border-radius: 0.6rem;
@@ -665,46 +666,6 @@ details.notes textarea {
   text-transform: uppercase;
   font-size: 0.8rem;
   color: #ffffffcc;
-}
-
-/* "Left to go" list, shown in the info panel on every non-work phase. Its
-   rows are deliberately quieter than the notes they sit above. */
-.left-head {
-  font-size: 0.7rem;
-  letter-spacing: 0.25em;
-  text-transform: uppercase;
-  color: #ffffff99;
-  margin-bottom: 0.3rem;
-}
-
-.left-row {
-  display: flex;
-  align-items: baseline;
-  gap: 0.6rem;
-  padding: 0.25rem 0 0.25rem 0.6rem;
-  border-left: 3px solid #ffffff4d;
-  font-variant-numeric: tabular-nums;
-}
-
-/* Whatever the notes start with, keep it clear of the last row. */
-.left-row + * {
-  margin-top: 0.7rem;
-}
-
-.left-name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.left-reps {
-  color: #ffffffcc;
-  font-size: 0.85rem;
-}
-
-.left-time {
-  font-weight: 700;
 }
 
 .run-controls {

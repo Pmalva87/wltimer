@@ -81,50 +81,7 @@ export async function renderRun(root: HTMLElement, target: string) {
   let finished = false;
   let lastPanelIdx = -1;
 
-  /**
-   * What is still to come after `phaseIdx`, grouped back into parts: the
-   * intervals of the current part that have not run yet, then every later
-   * part whole. Nothing already done appears — the point is what is left.
-   */
-  function remainingParts(phaseIdx: number) {
-    const parts: { block_idx: number; intervals: number; work_secs: number; secs: number }[] = [];
-    for (const p of plan!.phases.slice(phaseIdx + 1)) {
-      // A rest between parts belongs to neither of them.
-      if (p.kind !== "work" && p.kind !== "rest") continue;
-      let part = parts[parts.length - 1];
-      if (!part || part.block_idx !== p.block_idx) {
-        part = { block_idx: p.block_idx, intervals: 0, work_secs: 0, secs: 0 };
-        parts.push(part);
-      }
-      if (p.kind === "work") {
-        part.intervals++;
-        part.work_secs = p.secs;
-      }
-      part.secs += p.secs;
-    }
-    return parts;
-  }
-
   const upNextHead = (name: string) => `<div class="next-block">Up next: ${esc(name)}</div>`;
-
-  /** The peek itself: one row per part left, name · sets · time. */
-  function remainingHtml(phaseIdx: number): string {
-    const parts = remainingParts(phaseIdx);
-    if (parts.length === 0) return "";
-    const rows = parts
-      .map((part) => {
-        const block = plan!.blocks[part.block_idx];
-        const color = block?.color ? ` style="border-left-color:${esc(block.color)}"` : "";
-        return `
-          <div class="left-row"${color}>
-            <span class="left-name">${esc(block?.name ?? "part")}</span>
-            <span class="left-reps">${part.intervals} × ${fmtDuration(part.work_secs)}</span>
-            <span class="left-time">${fmtDuration(part.secs)}</span>
-          </div>`;
-      })
-      .join("");
-    return `<div class="left-head">left to go</div>${rows}`;
-  }
 
   function applyTick(s: Snapshot) {
     if (!plan || s.state === "idle") return;
@@ -150,21 +107,20 @@ export async function renderRun(root: HTMLElement, target: string) {
     el("totalleft").innerHTML =
       `<span class="total-left-label">workout left</span> ${fmtDuration(Math.ceil(s.total_remaining_ms / 1000))}`;
 
-    // The part that follows this one, while its last interval runs. That is
-    // when what comes after matters: the plates to change are decided before
-    // the bar is racked, and a part with no rest after it gives no later
-    // chance to read them at all.
+    // The part that follows this one, shown through every rest and through the
+    // last interval, which is when what comes after matters: the plates to
+    // change are decided before the bar is racked, and a part with no rest
+    // after it gives no later chance to read them at all. Ordinary work
+    // intervals stay bare — nothing but the current cues belongs on screen
+    // mid-set.
     const ahead =
-      kind === "work" && s.interval_idx === block.intervals
+      kind === "rest" || (kind === "work" && s.interval_idx === block.intervals)
         ? plan.blocks[s.block_idx + 1]
         : undefined;
 
-    // Info panel. While working it is cues only — nothing else belongs on
-    // screen mid-set — led by the next part's cues on that last interval.
-    // Every rest (and the get-ready) leads with what is left of the workout,
-    // so a glance answers "how much more?" without a tap. Rebuilt only when
-    // the phase changes: it is static within one, and ticks land five times a
-    // second.
+    // Info panel: the cues for what is being done, under the cues for what is
+    // coming. Rebuilt only when the phase changes — it is static within one,
+    // and ticks land five times a second.
     if (s.phase_idx !== lastPanelIdx) {
       lastPanelIdx = s.phase_idx;
       const descIdx =
@@ -178,8 +134,7 @@ export async function renderRun(root: HTMLElement, target: string) {
       const aheadCue = ahead?.description_html
         ? `<div class="up-next">${upNextHead(ahead.name)}${ahead.description_html}</div>`
         : "";
-      el("desc").innerHTML =
-        kind === "work" ? aheadCue + notes : remainingHtml(s.phase_idx) + notes;
+      el("desc").innerHTML = aheadCue + notes;
     }
     if (s.next_kind) {
       const nextBlock = plan.blocks[s.next_block_idx ?? 0];
