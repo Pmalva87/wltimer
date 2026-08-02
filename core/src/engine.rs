@@ -96,6 +96,48 @@ impl Engine {
         }]
     }
 
+    /// Pick a workout back up mid-flight, `elapsed` into phase `phase_idx`,
+    /// and run it from there. Positions past the end of the workout clamp to
+    /// its last phase, so a session saved against an edited workout still
+    /// resumes instead of failing.
+    pub fn restore(
+        &mut self,
+        workout: Workout,
+        phase_idx: usize,
+        elapsed: Duration,
+        now: Instant,
+    ) -> Vec<Cue> {
+        let phases = workout.flatten();
+        debug_assert!(!phases.is_empty());
+        let idx = phase_idx.min(phases.len() - 1);
+        let phase_len = Duration::from_secs(phases[idx].secs as u64);
+        let elapsed = elapsed.min(phase_len);
+        self.prev_remaining_ceil = (phase_len - elapsed).as_millis().div_ceil(1000) as u32;
+        self.workout = Some(workout);
+        self.phases = phases;
+        self.idx = idx;
+        self.state = State::Running;
+        // `elapsed` comes off disk and the process may have only just started,
+        // so back-dating the phase start has to tolerate underflow.
+        self.phase_start = Some(now.checked_sub(elapsed).unwrap_or(now));
+        self.paused_elapsed = elapsed;
+        vec![Cue::PhaseStart {
+            phase: self.phases[idx].kind,
+        }]
+    }
+
+    /// Which phase the run is in and how far into it — what a suspended
+    /// session needs to be picked up later. `None` unless a run is under way.
+    pub fn position(&self, now: Instant) -> Option<(usize, Duration)> {
+        let phase_len = Duration::from_secs(self.phases.get(self.idx)?.secs as u64);
+        let elapsed = match self.state {
+            State::Running => now.saturating_duration_since(self.phase_start?),
+            State::Paused => self.paused_elapsed,
+            _ => return None,
+        };
+        Some((self.idx, elapsed.min(phase_len)))
+    }
+
     pub fn pause(&mut self, now: Instant) {
         if self.state == State::Running {
             self.paused_elapsed = now - self.phase_start.expect("running engine has phase_start");
@@ -364,6 +406,75 @@ mod tests {
             }
         }
         assert_eq!(e.state(), State::Finished);
+    }
+
+    #[test]
+    fn position_tracks_the_current_phase() {
+        let t0 = Instant::now();
+        let mut e = Engine::new();
+        assert_eq!(e.position(t0), None, "nothing running");
+        e.start(workout(), t0);
+        e.advance(t0 + secs(14));
+        assert_eq!(e.position(t0 + secs(14)), Some((1, secs(4))));
+        e.pause(t0 + secs(14));
+        // Frozen while paused, however long the phone sits there.
+        assert_eq!(e.position(t0 + secs(99)), Some((1, secs(4))));
+    }
+
+    #[test]
+    fn restore_resumes_mid_phase() {
+        // Prepare(10) Work(10) Rest(5) Work(10) BlockRest(7) Work(8).
+        let t0 = Instant::now();
+        let mut e = Engine::new();
+        let cues = e.restore(workout(), 3, secs(4), t0);
+        assert_eq!(cues, vec![Cue::PhaseStart { phase: PhaseKind::Work }]);
+        assert_eq!(e.state(), State::Running);
+        let snap = e.snapshot(t0);
+        assert_eq!(snap.remaining_ms, 6000);
+        assert_eq!(snap.interval_idx, 2);
+        // 6s of this interval + BlockRest(7) + Work(8) still to come.
+        assert_eq!(snap.total_remaining_ms, 21_000);
+        // The clock carries on from there, pre-alerts and all.
+        let mut fired = Vec::new();
+        for ms in (0..6_000).step_by(200) {
+            for cue in e.advance(t0 + Duration::from_millis(ms)) {
+                if let Cue::PreAlert { secs_left } = cue {
+                    fired.push(secs_left);
+                }
+            }
+        }
+        assert_eq!(fired, vec![3, 2, 1]);
+        assert_eq!(
+            e.advance(t0 + secs(6)),
+            vec![Cue::PhaseStart { phase: PhaseKind::BlockRest }]
+        );
+    }
+
+    #[test]
+    fn restore_clamps_a_position_the_workout_no_longer_has() {
+        let t0 = Instant::now();
+        let mut e = Engine::new();
+        // Phase 99 does not exist and 60s is longer than the last phase.
+        e.restore(workout(), 99, secs(60), t0);
+        let snap = e.snapshot(t0);
+        assert_eq!(snap.phase_idx, 5);
+        assert_eq!(snap.remaining_ms, 0);
+        assert_eq!(e.advance(t0), vec![Cue::Finished]);
+    }
+
+    #[test]
+    fn position_survives_a_restore_round_trip() {
+        let t0 = Instant::now();
+        let mut e = Engine::new();
+        e.start(workout(), t0);
+        e.advance(t0 + secs(23));
+        let (idx, elapsed) = e.position(t0 + secs(23)).unwrap();
+        let mut resumed = Engine::new();
+        resumed.restore(workout(), idx, elapsed, t0);
+        assert_eq!(
+            resumed.snapshot(t0).remaining_ms,
+            e.snapshot(t0 + secs(23)).remaining_ms
+        );
     }
 
     #[test]

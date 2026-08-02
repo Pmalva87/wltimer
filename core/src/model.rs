@@ -96,6 +96,23 @@ impl Workout {
     pub fn total_secs(&self) -> u32 {
         self.flatten().iter().map(|p| p.secs).sum()
     }
+
+    /// Parts that run straight into the next one, with nothing in between —
+    /// see `flatten`, which drops a zero or absent "rest after".
+    ///
+    /// Not an error: a workout is free to chain parts back to back and runs
+    /// exactly as written. It is far more often an oversight than a choice,
+    /// though, so every screen that shows a workout says so.
+    pub fn parts_without_rest_after(&self) -> Vec<usize> {
+        let last = self.blocks.len().saturating_sub(1);
+        self.blocks
+            .iter()
+            .enumerate()
+            .take(last)
+            .filter(|(_, b)| b.rest_after_secs.unwrap_or(0) == 0)
+            .map(|(i, _)| i)
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -155,6 +172,33 @@ mod tests {
             ]
         );
         assert_eq!(w.total_secs(), PREPARE_SECS + 60 + 60 + 90 + 45);
+    }
+
+    #[test]
+    fn parts_running_into_the_next_are_flagged() {
+        let w = Workout {
+            id: None,
+            name: "w".into(),
+            blocks: vec![
+                block(1, 60, None, Some(90)),
+                block(1, 60, None, None),
+                block(1, 60, None, Some(0)),
+                // The last part has nothing to run into, so it never counts,
+                // whatever its "rest after" says.
+                block(1, 60, None, None),
+            ],
+        };
+        assert_eq!(w.parts_without_rest_after(), vec![1, 2]);
+    }
+
+    #[test]
+    fn a_single_part_never_runs_into_anything() {
+        let w = Workout {
+            id: None,
+            name: "w".into(),
+            blocks: vec![block(3, 60, Some(30), None)],
+        };
+        assert!(w.parts_without_rest_after().is_empty());
     }
 
     #[test]

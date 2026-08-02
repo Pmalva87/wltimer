@@ -14,6 +14,9 @@ pub struct WorkoutSummary {
     pub name: String,
     pub block_count: usize,
     pub total_secs: u32,
+    /// How many parts run straight into the next one — see
+    /// `Workout::parts_without_rest_after`.
+    pub parts_without_rest: usize,
     /// Set when the stored file no longer parses (e.g. edited externally).
     pub error: Option<String>,
 }
@@ -144,6 +147,7 @@ impl Store {
                     name: w.name.clone(),
                     block_count: w.blocks.len(),
                     total_secs: w.total_secs(),
+                    parts_without_rest: w.parts_without_rest_after().len(),
                     error: None,
                 },
                 Err(errs) => WorkoutSummary {
@@ -151,6 +155,7 @@ impl Store {
                     slug,
                     block_count: 0,
                     total_secs: 0,
+                    parts_without_rest: 0,
                     error: Some(format!("line {}: {}", errs[0].line, errs[0].message)),
                 },
             })
@@ -224,6 +229,7 @@ impl Store {
             name,
             block_count: workout.blocks.len(),
             total_secs: workout.total_secs(),
+            parts_without_rest: workout.parts_without_rest_after().len(),
             error: None,
         })
     }

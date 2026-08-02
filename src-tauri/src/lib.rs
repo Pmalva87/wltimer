@@ -1,11 +1,12 @@
 mod commands;
 
-use commands::{AppState, RunOrigin};
+use commands::AppState;
 use std::sync::Mutex;
 use tauri::Manager;
 use wltimer_core::days::DayStore;
 use wltimer_core::engine::Engine;
 use wltimer_core::plan::PlanStore;
+use wltimer_core::session::{RunOrigin, SessionStore};
 use wltimer_core::store::Store;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -18,6 +19,7 @@ pub fn run() {
                 store: Store::new(data.join("workouts"))?,
                 days: DayStore::new(data.join("days"))?,
                 plans: PlanStore::new(data.join("plans"))?,
+                sessions: SessionStore::new(data)?,
                 origin: Mutex::new(RunOrigin::None),
             });
             commands::spawn_ticker(app.handle().clone());
@@ -53,8 +55,10 @@ pub fn run() {
             commands::start_day_entry,
             commands::pause_timer,
             commands::resume_timer,
-            commands::stop_timer,
+            commands::suspend_timer,
             commands::skip_phase,
+            commands::get_session,
+            commands::resume_session,
             commands::get_snapshot,
         ])
         .run(tauri::generate_context!())

@@ -1,7 +1,7 @@
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::sync::Mutex;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 use wltimer_core::days::{self, DayEntry, DayStatus, DayStore, DaySummary};
 use wltimer_core::engine::{Cue, Engine, Snapshot};
@@ -9,25 +9,15 @@ use wltimer_core::ids;
 use wltimer_core::model::{Phase, Workout};
 use wltimer_core::parser::{self, ParseError};
 use wltimer_core::plan::{self, Plan, PlanStore, PlanSummary};
+use wltimer_core::session::{RunOrigin, SavedSession, SessionStore};
 use wltimer_core::store::{Store, WorkoutSummary};
-
-/// Where the currently running workout came from — decides how a finished run
-/// is recorded on the calendar.
-pub enum RunOrigin {
-    None,
-    /// A scheduled calendar entry: flip it to done.
-    Day { date: String, index: usize },
-    /// A library template: append a done entry to the start date.
-    Library { date: String, slug: String },
-    /// An unsaved builder run: append a done entry to the start date.
-    Adhoc { date: String },
-}
 
 pub struct AppState {
     pub engine: Mutex<Engine>,
     pub store: Store,
     pub days: DayStore,
     pub plans: PlanStore,
+    pub sessions: SessionStore,
     pub origin: Mutex<RunOrigin>,
 }
 
@@ -55,6 +45,8 @@ pub enum Preview {
         name: String,
         block_count: usize,
         total_secs: u32,
+        /// How many parts run straight into the next one.
+        parts_without_rest: usize,
     },
     Err {
         errors: Vec<ParseError>,
@@ -158,6 +150,7 @@ pub fn parse_preview(source: String) -> Preview {
             name: w.name.clone(),
             block_count: w.blocks.len(),
             total_secs: w.total_secs(),
+            parts_without_rest: w.parts_without_rest_after().len(),
         },
         Err(errors) => Preview::Err { errors },
     }
@@ -196,6 +189,8 @@ pub struct ViewBlock {
     pub rest_secs: Option<u32>,
     pub rest_after_secs: Option<u32>,
     pub block_secs: u32,
+    /// This part runs straight into the next one, with nothing in between.
+    pub no_rest_after: bool,
     pub description_html: String,
 }
 
@@ -203,6 +198,8 @@ pub struct ViewBlock {
 pub fn view_workout(source: String) -> Result<WorkoutView, Vec<ParseError>> {
     let w = parser::parse_workout(&source)?;
     let last = w.blocks.len().saturating_sub(1);
+    let no_rest: std::collections::HashSet<usize> =
+        w.parts_without_rest_after().into_iter().collect();
     Ok(WorkoutView {
         id: w.id.clone(),
         name: w.name.clone(),
@@ -220,6 +217,7 @@ pub fn view_workout(source: String) -> Result<WorkoutView, Vec<ParseError>> {
                 rest_after_secs: if i < last { b.rest_after_secs } else { None },
                 block_secs: b.intervals * b.work_secs
                     + b.rest_secs.unwrap_or(0) * b.intervals.saturating_sub(1),
+                no_rest_after: no_rest.contains(&i),
                 description_html: parser::render_markdown(&b.description_md),
             })
             .collect(),
@@ -517,8 +515,8 @@ pub fn start_day_entry(
     start(app, state, workout)
 }
 
-fn start(app: AppHandle, state: State<AppState>, workout: Workout) -> Result<RunPlan, String> {
-    let plan = RunPlan {
+fn run_plan(workout: &Workout) -> RunPlan {
+    RunPlan {
         workout_name: workout.name.clone(),
         blocks: workout
             .blocks
@@ -532,12 +530,88 @@ fn start(app: AppHandle, state: State<AppState>, workout: Workout) -> Result<Run
             .collect(),
         phases: workout.flatten(),
         total_secs: workout.total_secs(),
-    };
+    }
+}
+
+fn start(app: AppHandle, state: State<AppState>, workout: Workout) -> Result<RunPlan, String> {
+    let plan = run_plan(&workout);
     let now = Instant::now();
     let mut engine = state.engine.lock().unwrap();
     let cues = engine.start(workout, now);
+    after_cues(&state, &engine, &cues, now);
     emit(&app, &engine.snapshot(now), &cues);
     Ok(plan)
+}
+
+// ---- suspended sessions ----
+
+/// What the start screen shows about a run waiting to be picked back up.
+#[derive(Serialize)]
+pub struct SessionInfo {
+    /// The `#/run/<target>` route this session belongs to.
+    pub target: String,
+    pub workout_name: String,
+    pub phase_idx: usize,
+    pub total_phases: usize,
+    pub remaining_secs: u32,
+}
+
+/// The run suspended earlier today, if any. Sessions do not outlive their day.
+#[tauri::command]
+pub fn get_session(state: State<AppState>, today: String) -> Option<SessionInfo> {
+    let saved = state.sessions.load(&date_or_local(&today))?;
+    Some(SessionInfo {
+        target: saved.origin.target()?,
+        workout_name: saved.workout.name.clone(),
+        phase_idx: saved.phase_idx,
+        total_phases: saved.workout.flatten().len(),
+        remaining_secs: saved.remaining_secs(),
+    })
+}
+
+/// Put the suspended run back on the clock, right where it stopped.
+#[tauri::command]
+pub fn resume_session(
+    app: AppHandle,
+    state: State<AppState>,
+    today: String,
+) -> Result<RunPlan, String> {
+    let saved = state
+        .sessions
+        .load(&date_or_local(&today))
+        .ok_or("nothing to resume")?;
+    let plan = run_plan(&saved.workout);
+    *state.origin.lock().unwrap() = saved.origin;
+    let now = Instant::now();
+    let mut engine = state.engine.lock().unwrap();
+    let cues = engine.restore(
+        saved.workout,
+        saved.phase_idx,
+        Duration::from_millis(saved.elapsed_ms),
+        now,
+    );
+    emit(&app, &engine.snapshot(now), &cues);
+    Ok(plan)
+}
+
+/// Write the run in progress to disk so it can be picked up again later today.
+/// A run without an origin has nowhere to be recorded and is not saved.
+fn save_session(state: &AppState, engine: &Engine, now: Instant) {
+    let origin = state.origin.lock().unwrap().clone();
+    if origin == RunOrigin::None {
+        return;
+    }
+    let (Some(workout), Some((phase_idx, elapsed))) = (engine.workout(), engine.position(now))
+    else {
+        return;
+    };
+    let _ = state.sessions.save(&SavedSession {
+        date: local_date(),
+        origin,
+        workout: workout.clone(),
+        phase_idx,
+        elapsed_ms: elapsed.as_millis() as u64,
+    });
 }
 
 // ---- run control ----
@@ -547,6 +621,7 @@ pub fn pause_timer(app: AppHandle, state: State<AppState>) {
     let now = Instant::now();
     let mut engine = state.engine.lock().unwrap();
     engine.pause(now);
+    save_session(&state, &engine, now);
     emit(&app, &engine.snapshot(now), &[]);
 }
 
@@ -558,12 +633,17 @@ pub fn resume_timer(app: AppHandle, state: State<AppState>) {
     emit(&app, &engine.snapshot(now), &[]);
 }
 
+/// Leave the run screen without giving the workout up: an unfinished run is
+/// frozen on disk first, so the same workout can be resumed later today.
 #[tauri::command]
-pub fn stop_timer(app: AppHandle, state: State<AppState>) {
+pub fn suspend_timer(app: AppHandle, state: State<AppState>) {
+    let now = Instant::now();
     let mut engine = state.engine.lock().unwrap();
+    engine.pause(now);
+    save_session(&state, &engine, now);
     engine.stop();
     *state.origin.lock().unwrap() = RunOrigin::None;
-    emit(&app, &engine.snapshot(Instant::now()), &[]);
+    emit(&app, &engine.snapshot(now), &[]);
 }
 
 #[tauri::command]
@@ -571,7 +651,7 @@ pub fn skip_phase(app: AppHandle, state: State<AppState>) {
     let now = Instant::now();
     let mut engine = state.engine.lock().unwrap();
     let cues = engine.skip(now);
-    maybe_record(&state, &engine, &cues);
+    after_cues(&state, &engine, &cues, now);
     emit(&app, &engine.snapshot(now), &cues);
 }
 
@@ -589,11 +669,20 @@ fn emit(app: &AppHandle, snapshot: &Snapshot, cues: &[Cue]) {
     }
 }
 
-/// When a run just finished, record it on the calendar according to its origin.
-fn maybe_record(state: &AppState, engine: &Engine, cues: &[Cue]) {
-    if !cues.iter().any(|c| matches!(c, Cue::Finished)) {
-        return;
+/// Bookkeeping for the cues a tick produced: a finished run goes on the
+/// calendar and gives up its session, while crossing into a new phase refreshes
+/// the saved one, so a run cut short by the OS resumes at the phase it reached.
+fn after_cues(state: &AppState, engine: &Engine, cues: &[Cue], now: Instant) {
+    if cues.iter().any(|c| matches!(c, Cue::Finished)) {
+        record_finished(state, engine);
+        state.sessions.clear();
+    } else if cues.iter().any(|c| matches!(c, Cue::PhaseStart { .. })) {
+        save_session(state, engine, now);
     }
+}
+
+/// Record a finished run on the calendar according to its origin.
+fn record_finished(state: &AppState, engine: &Engine) {
     let Some(workout) = engine.workout() else {
         return;
     };
@@ -649,7 +738,7 @@ pub fn spawn_ticker(app: AppHandle) {
                 match engine.state() {
                     wltimer_core::engine::State::Running => {
                         let cues = engine.advance(now);
-                        maybe_record(&state, &engine, &cues);
+                        after_cues(&state, &engine, &cues, now);
                         (Some(engine.snapshot(now)), cues)
                     }
                     wltimer_core::engine::State::Paused => (Some(engine.snapshot(now)), Vec::new()),

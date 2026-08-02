@@ -1,7 +1,7 @@
 import { api, fmtDuration, todayStr, type DayEntryInfo, type ParseError } from "../api";
 import { copyText } from "../clipboard";
 import { tabBar } from "../tabs";
-import { esc } from "./library";
+import { esc, noRestChip } from "./library";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -36,7 +36,12 @@ export async function renderCalendar(root: HTMLElement, dateArg: string | null) 
     el.textContent = msg;
   }
 
-  function entryCard(e: DayEntryInfo, i: number, totalSecs: number | null): string {
+  function entryCard(
+    e: DayEntryInfo,
+    i: number,
+    totalSecs: number | null,
+    noRestCount: number,
+  ): string {
     const done = e.status === "done";
     const when = e.completed_at
       ? ` · ${new Date(e.completed_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
@@ -46,7 +51,7 @@ export async function renderCalendar(root: HTMLElement, dateArg: string | null) 
       <div class="day-entry ${done ? "done" : ""}">
         <a class="info tappable" href="#/view/@${selected}:${i}">
           <span class="name">${esc(e.name)}</span>
-          <span class="meta">${done ? `✓ done${when}` : "⧗ planned"}${duration}${e.source_slug ? ` · from library` : ""}${e.source_plan ? ` · plan: ${esc(e.source_plan)}` : ""}</span>
+          <span class="meta">${done ? `✓ done${when}` : "⧗ planned"}${duration}${e.source_slug ? ` · from library` : ""}${e.source_plan ? ` · plan: ${esc(e.source_plan)}` : ""}${noRestChip(noRestCount)}</span>
         </a>
         ${
           movingIdx === i
@@ -71,11 +76,10 @@ export async function renderCalendar(root: HTMLElement, dateArg: string | null) 
     const summaries = await api.getMonth(viewYear, viewMonth);
     const byDate = new Map(summaries.map((s) => [s.date, s.entries]));
     const entries: DayEntryInfo[] = await api.getDay(selected).catch(() => []);
-    const entryTotals = await Promise.all(
-      entries.map((e) =>
-        api.parsePreview(e.markdown).then((p) => (p.status === "ok" ? p.total_secs : null)),
-      ),
-    );
+    // One parse per entry, read for both its duration and its warnings.
+    const previews = await Promise.all(entries.map((e) => api.parsePreview(e.markdown)));
+    const entryTotals = previews.map((p) => (p.status === "ok" ? p.total_secs : null));
+    const entryNoRest = previews.map((p) => (p.status === "ok" ? p.parts_without_rest : 0));
     const plannedTotal = entries.reduce(
       (sum, e, i) => (e.status === "planned" && entryTotals[i] != null ? sum + entryTotals[i]! : sum),
       0,
@@ -125,7 +129,7 @@ export async function renderCalendar(root: HTMLElement, dateArg: string | null) 
           ${
             entries.length === 0
               ? `<div class="empty small">Nothing on this day.</div>`
-              : entries.map((e, i) => entryCard(e, i, entryTotals[i])).join("")
+              : entries.map((e, i) => entryCard(e, i, entryTotals[i], entryNoRest[i])).join("")
           }
           <div id="daystatus" class="editor-status"></div>
           ${

@@ -2,6 +2,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   api,
   fmtDuration,
+  partsWithoutRestAfter,
   workoutTotalSecs,
   type Cue,
   type PhaseKind,
@@ -33,6 +34,11 @@ const LABELS: Record<PhaseKind, string> = {
 export async function renderRun(root: HTMLElement, target: string) {
   const draft = target === "draft" ? loadRunDraft() : null;
   const dayMatch = target.match(/^@(\d{4}-\d{2}-\d{2}):(\d+)$/);
+  // A run left unfinished earlier today waits as a session; it is offered back
+  // on its own start screen and only pointed at from any other one, so it
+  // cannot be replaced without noticing. Sessions do not outlive their day.
+  const session = await api.getSession();
+  const resumable = session?.target === target ? session : null;
   root.innerHTML = `
     <div class="screen run" id="runscreen">
       <header class="topbar run-top">
@@ -57,6 +63,8 @@ export async function renderRun(root: HTMLElement, target: string) {
       <div id="startoverlay" class="overlay">
         <h2 id="ovname"></h2>
         <div id="ovmeta" class="ov-meta"></div>
+        <div id="ovwarn" class="ov-warn" hidden></div>
+        <div id="ovresume" class="ov-resume"></div>
         <button id="start" class="btn start">START</button>
         <a class="btn" href="#/">‹ Back</a>
       </div>
@@ -71,7 +79,52 @@ export async function renderRun(root: HTMLElement, target: string) {
   let plan: RunPlan | null = null;
   let paused = false;
   let finished = false;
-  let lastDescIdx = -1;
+  let lastPanelIdx = -1;
+
+  /**
+   * What is still to come after `phaseIdx`, grouped back into parts: the
+   * intervals of the current part that have not run yet, then every later
+   * part whole. Nothing already done appears — the point is what is left.
+   */
+  function remainingParts(phaseIdx: number) {
+    const parts: { block_idx: number; intervals: number; work_secs: number; secs: number }[] = [];
+    for (const p of plan!.phases.slice(phaseIdx + 1)) {
+      // A rest between parts belongs to neither of them.
+      if (p.kind !== "work" && p.kind !== "rest") continue;
+      let part = parts[parts.length - 1];
+      if (!part || part.block_idx !== p.block_idx) {
+        part = { block_idx: p.block_idx, intervals: 0, work_secs: 0, secs: 0 };
+        parts.push(part);
+      }
+      if (p.kind === "work") {
+        part.intervals++;
+        part.work_secs = p.secs;
+      }
+      part.secs += p.secs;
+    }
+    return parts;
+  }
+
+  const upNextHead = (name: string) => `<div class="next-block">Up next: ${esc(name)}</div>`;
+
+  /** The peek itself: one row per part left, name · sets · time. */
+  function remainingHtml(phaseIdx: number): string {
+    const parts = remainingParts(phaseIdx);
+    if (parts.length === 0) return "";
+    const rows = parts
+      .map((part) => {
+        const block = plan!.blocks[part.block_idx];
+        const color = block?.color ? ` style="border-left-color:${esc(block.color)}"` : "";
+        return `
+          <div class="left-row"${color}>
+            <span class="left-name">${esc(block?.name ?? "part")}</span>
+            <span class="left-reps">${part.intervals} × ${fmtDuration(part.work_secs)}</span>
+            <span class="left-time">${fmtDuration(part.secs)}</span>
+          </div>`;
+      })
+      .join("");
+    return `<div class="left-head">left to go</div>${rows}`;
+  }
 
   function applyTick(s: Snapshot) {
     if (!plan || s.state === "idle") return;
@@ -97,24 +150,47 @@ export async function renderRun(root: HTMLElement, target: string) {
     el("totalleft").innerHTML =
       `<span class="total-left-label">workout left</span> ${fmtDuration(Math.ceil(s.total_remaining_ms / 1000))}`;
 
-    // Notes panel: current block while working/resting, upcoming block otherwise.
-    // Blocks without notes (e.g. quick timers) show nothing.
-    const descIdx =
-      kind === "work" || kind === "rest" ? s.block_idx : (s.next_block_idx ?? s.block_idx);
-    const descBlock = plan.blocks[descIdx];
-    if (descIdx !== lastDescIdx && descBlock) {
-      lastDescIdx = descIdx;
-      el("desc").innerHTML = descBlock.description_html
-        ? (kind === "prepare" || kind === "block_rest"
-            ? `<div class="next-block">Up next: ${esc(descBlock.name)}</div>`
-            : "") + descBlock.description_html
+    // The part that follows this one, while its last interval runs. That is
+    // when what comes after matters: the plates to change are decided before
+    // the bar is racked, and a part with no rest after it gives no later
+    // chance to read them at all.
+    const ahead =
+      kind === "work" && s.interval_idx === block.intervals
+        ? plan.blocks[s.block_idx + 1]
+        : undefined;
+
+    // Info panel. While working it is cues only — nothing else belongs on
+    // screen mid-set — led by the next part's cues on that last interval.
+    // Every rest (and the get-ready) leads with what is left of the workout,
+    // so a glance answers "how much more?" without a tap. Rebuilt only when
+    // the phase changes: it is static within one, and ticks land five times a
+    // second.
+    if (s.phase_idx !== lastPanelIdx) {
+      lastPanelIdx = s.phase_idx;
+      const descIdx =
+        kind === "work" || kind === "rest" ? s.block_idx : (s.next_block_idx ?? s.block_idx);
+      const descBlock = plan.blocks[descIdx];
+      // Blocks without notes (e.g. quick timers) contribute nothing.
+      const notes = descBlock?.description_html
+        ? (kind === "prepare" || kind === "block_rest" ? upNextHead(descBlock.name) : "") +
+          descBlock.description_html
         : "";
+      const aheadCue = ahead?.description_html
+        ? `<div class="up-next">${upNextHead(ahead.name)}${ahead.description_html}</div>`
+        : "";
+      el("desc").innerHTML =
+        kind === "work" ? aheadCue + notes : remainingHtml(s.phase_idx) + notes;
     }
     if (s.next_kind) {
       const nextBlock = plan.blocks[s.next_block_idx ?? 0];
       const nextName =
         s.next_kind === "work" ? (nextBlock?.name ?? "work") : LABELS[s.next_kind].toLowerCase();
-      el("nextup").textContent = `next: ${nextName}`;
+      // A rest names what waits on the other side of it, so the last interval
+      // says "then Bench Press" rather than just "block rest".
+      el("nextup").textContent =
+        ahead && s.next_kind !== "work"
+          ? `next: ${nextName}, then ${ahead.name}`
+          : `next: ${nextName}`;
     } else {
       el("nextup").textContent = "last one — finish strong!";
     }
@@ -166,21 +242,44 @@ export async function renderRun(root: HTMLElement, target: string) {
     listen<Cue>("timer:cue", (e) => onCue(e.payload)),
   ];
 
-  el("start").addEventListener("click", async () => {
+  /** Put a run on the clock — a fresh one or a resumed one — and get out of
+   *  the overlay's way. */
+  async function begin(load: () => Promise<RunPlan>) {
     initAudio();
     try {
-      plan = dayMatch
-        ? await api.startDayEntry(dayMatch[1], Number(dayMatch[2]))
-        : draft
-          ? await api.startCustom(draft)
-          : await api.startWorkout(target);
+      plan = await load();
     } catch (e) {
       el("ovmeta").textContent = String(e);
       return;
     }
+    paused = false;
+    pauseBtn.textContent = "Pause";
+    screen.classList.remove("paused");
     el("startoverlay").style.display = "none";
     el("wname").textContent = plan.workout_name;
+  }
+
+  el("start").addEventListener("click", () => {
+    void begin(() =>
+      dayMatch
+        ? api.startDayEntry(dayMatch[1], Number(dayMatch[2]))
+        : draft
+          ? api.startCustom(draft)
+          : api.startWorkout(target),
+    );
   });
+
+  /** Say so when parts chain together, and start anyway — it is a heads-up
+   *  about how the workout will run, not a reason to stop it. */
+  function showNoRestWarning(count: number) {
+    if (count === 0) return;
+    const warn = el("ovwarn");
+    warn.textContent =
+      count === 1
+        ? "⚠ one part runs straight into the next — no rest in between"
+        : `⚠ ${count} parts run straight into the next — no rest in between`;
+    warn.hidden = false;
+  }
 
   // Show name/duration on the start overlay without starting the timer.
   if (dayMatch) {
@@ -188,7 +287,9 @@ export async function renderRun(root: HTMLElement, target: string) {
     void api.getDay(dayMatch[1]).then(async (entries) => {
       const entry = entries[Number(dayMatch[2])];
       if (!entry) {
-        el("ovname").textContent = "Nothing to run";
+        // The workout travels with the session, so a paused run outlives the
+        // calendar entry it came from and can still be finished.
+        el("ovname").textContent = resumable?.workout_name ?? "Nothing to run";
         el("ovmeta").textContent = "this calendar entry no longer exists";
         return;
       }
@@ -196,6 +297,7 @@ export async function renderRun(root: HTMLElement, target: string) {
       const parsed = await api.parseFull(entry.markdown);
       if (parsed.status === "ok") {
         el("ovmeta").textContent = `total ${fmtDuration(workoutTotalSecs(parsed.workout))}`;
+        showNoRestWarning(partsWithoutRestAfter(parsed.workout).length);
       }
     });
   } else if (target === "draft") {
@@ -205,6 +307,10 @@ export async function renderRun(root: HTMLElement, target: string) {
         draft.blocks
           .map((b) => `${b.intervals} × ${fmtDuration(b.work_secs)}`)
           .join("  ·  ") + `  ·  total ${fmtDuration(workoutTotalSecs(draft))}`;
+      showNoRestWarning(partsWithoutRestAfter(draft).length);
+    } else if (resumable) {
+      el("ovname").textContent = resumable.workout_name;
+      el("ovmeta").textContent = "the quick timer it was built from is gone";
     } else {
       el("ovname").textContent = "Nothing to run";
       el("ovmeta").textContent = "build a workout first";
@@ -216,8 +322,24 @@ export async function renderRun(root: HTMLElement, target: string) {
       if (w) {
         el("ovname").textContent = w.name;
         el("ovmeta").textContent = `${w.block_count} exercise${w.block_count === 1 ? "" : "s"} · ${fmtDuration(w.total_secs)}`;
+        showNoRestWarning(w.parts_without_rest);
       }
     });
+  }
+
+  if (resumable) {
+    el("ovresume").innerHTML = `
+      <div class="ov-note">paused at ${resumable.phase_idx + 1}/${resumable.total_phases}
+        · ${fmtDuration(resumable.remaining_secs)} left</div>
+      <button id="resume" class="btn start">RESUME</button>`;
+    // Starting fresh is still one tap away, just no longer the loud one.
+    el("start").classList.remove("start");
+    el("start").textContent = "Start over";
+    el("resume").addEventListener("click", () => void begin(() => api.resumeSession()));
+  } else if (session) {
+    el("ovresume").innerHTML = `
+      <a class="ov-note" href="#/run/${encodeURIComponent(session.target)}">
+        ${esc(session.workout_name)} is paused — ${fmtDuration(session.remaining_secs)} left</a>`;
   }
 
   pauseBtn.addEventListener("click", async () => {
@@ -241,7 +363,8 @@ export async function renderRun(root: HTMLElement, target: string) {
   });
 
   return () => {
-    void api.stop();
+    // Leaving mid-workout keeps the run as a session rather than binning it.
+    void api.suspend();
     for (const p of unlisteners) {
       void p.then((un) => un());
     }

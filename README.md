@@ -17,7 +17,28 @@ list, so it is never a mis-tap away.
 Notes are shown on screen while the
 part runs. Work and rest phases get distinct colors, with beeps + amber
 flashes at 3‑2‑1 before every transition, distinct sounds for work/rest
-starts, and a large whole-workout countdown at the top of the run screen.
+starts, and a large whole-workout countdown at the top of the run screen. Every
+rest — and the get-ready countdown — leads that panel with **left to go**: one
+row per part still ahead, with the intervals and the time each has left, so a
+glance during a rest answers "how much more?" without a tap. Work phases stay
+bare: cues only — except on a part's **last interval**, where the next part's
+cues (which is where loads tend to be written) lead the panel in a box of their
+own, and the line under the timer reads "next: block rest, then Bench Press".
+The bar can then be reloaded the moment it is racked, which matters most when a
+part has no rest after it and there is no later chance to read them.
+
+Leaving the run screen mid-workout — or the phone killing the app — does not
+throw the workout away: it is kept as a **paused session**, and starting that
+workout again offers RESUME — picking up in the same phase, at the same second
+— alongside "Start over". A session only lives for its day; the next morning
+the workout simply starts from the top.
+
+A part with no rest after it runs straight into the next one, which is far more
+often a slip than a choice, so it is flagged in amber wherever the workout is
+shown: under that part in the builder (live, as you change the rest) and in the
+read-only view, as a chip on its row in the workout list and on the calendar,
+and as a one-line heads-up on the start screen. It is only ever a warning — the
+workout saves and runs exactly as written.
 
 ## Workout format
 

@@ -1,6 +1,7 @@
 import {
   api,
   fmtDuration,
+  partsWithoutRestAfter,
   workoutTotalSecs,
   PREPARE_SECS,
   type Block,
@@ -178,6 +179,17 @@ export async function renderBuilder(root: HTMLElement, slug: string | null, asTa
       </div>`;
   }
 
+  /**
+   * Flag the parts that run straight into the next one. A standing warning
+   * rather than a block: chaining parts is allowed, it is just rarely meant.
+   */
+  function refreshWarnings() {
+    const flagged = new Set(partsWithoutRestAfter(w));
+    root.querySelectorAll<HTMLElement>(".part-warn").forEach((el) => {
+      el.hidden = !flagged.has(Number(el.dataset.part));
+    });
+  }
+
   function refreshTotal() {
     const el = root.querySelector<HTMLElement>("#total");
     if (el) {
@@ -230,6 +242,9 @@ export async function renderBuilder(root: HTMLElement, slug: string | null, asTa
                   ? `<div class="quick-row">
                        <span class="quick-label">Rest after part</span>
                        ${stepper(i, "rest_after_secs", 5, "−5s", "+5s")}
+                     </div>
+                     <div class="part-warn" data-part="${i}" ${b.rest_after_secs ? "hidden" : ""}>
+                       ⚠ Runs straight into the next part — no rest in between
                      </div>`
                   : ""
               }
@@ -294,6 +309,7 @@ export async function renderBuilder(root: HTMLElement, slug: string | null, asTa
           // would scroll the pane back to the top mid-edit.
           out.textContent = stepValue(b, field);
           refreshTotal();
+          refreshWarnings();
         });
       });
     });

@@ -5,6 +5,8 @@ export interface WorkoutSummary {
   name: string;
   block_count: number;
   total_secs: number;
+  /** How many parts run straight into the next one. */
+  parts_without_rest: number;
   error: string | null;
 }
 
@@ -14,7 +16,14 @@ export interface ParseError {
 }
 
 export type Preview =
-  | { status: "ok"; name: string; block_count: number; total_secs: number }
+  | {
+      status: "ok";
+      name: string;
+      block_count: number;
+      total_secs: number;
+      /** How many parts run straight into the next one. */
+      parts_without_rest: number;
+    }
   | { status: "err"; errors: ParseError[] };
 
 export interface Block {
@@ -45,6 +54,8 @@ export interface ViewBlock {
   rest_after_secs: number | null;
   /** Work + between-interval rest for this part, excluding the rest after it. */
   block_secs: number;
+  /** This part runs straight into the next one, with nothing in between. */
+  no_rest_after: boolean;
   description_html: string;
 }
 
@@ -108,6 +119,17 @@ export function workoutTotalSecs(w: Workout): number {
   );
 }
 
+/**
+ * Mirrors Workout::parts_without_rest_after: the parts that run straight into
+ * the next one. Used for live feedback in the builder, where the workout only
+ * exists in the form; everything stored comes with the backend's own answer.
+ */
+export function partsWithoutRestAfter(w: Workout): number[] {
+  return w.blocks.flatMap((b, i) =>
+    i < w.blocks.length - 1 && !b.rest_after_secs ? [i] : [],
+  );
+}
+
 export type PhaseKind = "prepare" | "work" | "rest" | "block_rest";
 
 export interface Phase {
@@ -145,6 +167,16 @@ export interface Snapshot {
   interval_idx: number;
   next_kind: PhaseKind | null;
   next_block_idx: number | null;
+}
+
+/** A run left unfinished earlier today, waiting to be resumed or started over. */
+export interface SessionInfo {
+  /** The `#/run/<target>` route this session belongs to. */
+  target: string;
+  workout_name: string;
+  phase_idx: number;
+  total_phases: number;
+  remaining_secs: number;
 }
 
 export type Cue =
@@ -201,8 +233,11 @@ export const api = {
   deletePlan: (slug: string) => invoke<void>("delete_plan", { slug }),
   pause: () => invoke<void>("pause_timer"),
   resume: () => invoke<void>("resume_timer"),
-  stop: () => invoke<void>("stop_timer"),
+  /** Leave the run screen; an unfinished run is kept as a resumable session. */
+  suspend: () => invoke<void>("suspend_timer"),
   skip: () => invoke<void>("skip_phase"),
+  getSession: () => invoke<SessionInfo | null>("get_session", { today: todayStr() }),
+  resumeSession: () => invoke<RunPlan>("resume_session", { today: todayStr() }),
   getSnapshot: () => invoke<Snapshot>("get_snapshot"),
 };
 

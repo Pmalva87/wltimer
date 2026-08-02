@@ -8,6 +8,17 @@ export function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 }
 
+/**
+ * Trailing chip for a list row's meta line — leading separator included —
+ * flagging parts that run straight into the next one. Empty when there are
+ * none, so it can be dropped into any meta line unconditionally.
+ */
+export function noRestChip(count: number): string {
+  return count === 0
+    ? ""
+    : ` · <span class="meta-warn">⚠ ${count} part${count === 1 ? "" : "s"} with no rest after</span>`;
+}
+
 /** Two-tap confirmation for destructive buttons. */
 function armDelete(btn: HTMLButtonElement, label: string, action: () => Promise<void>) {
   btn.addEventListener("click", async () => {
@@ -99,7 +110,7 @@ export async function renderLibrary(root: HTMLElement) {
                       : `<li class="workout" data-i="${i}">
                            <a class="info tappable" href="#/view/${encodeURIComponent(w.slug)}">
                              <span class="name">${esc(w.name)}</span>
-                             <span class="meta">${w.block_count} exercise${w.block_count === 1 ? "" : "s"} · ${fmtDuration(w.total_secs)}</span>
+                             <span class="meta">${w.block_count} exercise${w.block_count === 1 ? "" : "s"} · ${fmtDuration(w.total_secs)}${noRestChip(w.parts_without_rest)}</span>
                            </a>
                            <div class="actions dense">
                              <a class="btn primary" href="#/run/${encodeURIComponent(w.slug)}">▶ Run</a>

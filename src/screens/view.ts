@@ -139,6 +139,11 @@ function partCard(b: WorkoutView["blocks"][number], i: number): string {
       <dl class="view-rows">
         ${rows.map(([k, v]) => `<div class="view-row"><dt>${k}</dt><dd>${v}</dd></div>`).join("")}
       </dl>
+      ${
+        b.no_rest_after
+          ? `<div class="part-warn">⚠ Runs straight into the next part — no rest in between</div>`
+          : ""
+      }
       ${b.description_html ? `<div class="view-notes">${b.description_html}</div>` : ""}
     </section>`;
 }

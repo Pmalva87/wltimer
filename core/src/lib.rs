@@ -4,5 +4,6 @@ pub mod ids;
 pub mod model;
 pub mod parser;
 pub mod plan;
+pub mod session;
 pub mod store;
 pub mod zio;
