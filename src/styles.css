@@ -542,6 +542,9 @@ details.notes textarea {
 
 .run-main {
   flex: 1;
+  /* Absorb any shortfall here rather than pushing the controls off screen. */
+  min-height: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -677,6 +680,83 @@ details.notes textarea {
   display: flex;
   gap: 0.75rem;
   padding: 0.9rem 1rem calc(0.9rem + env(safe-area-inset-bottom));
+  /* Pause and Skip are the only way to work the timer — they stay put however
+     little height there is. */
+  flex-shrink: 0;
+}
+
+/* Turned sideways a phone has barely 400px of height and the stacked layout
+   runs off the bottom of it, taking Pause and Skip with it. There is width to
+   spare instead, so the cues move alongside the clock and the controls keep
+   their place across the bottom.
+
+   The second column is `auto`: `.desc:empty` is display:none, which leaves
+   that track with no items, so it collapses to nothing and the clock has the
+   full width to itself. */
+@media (max-height: 520px) {
+  .run {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto auto 1fr auto;
+  }
+
+  .run-top,
+  .total-left,
+  .run-controls {
+    grid-column: 1 / -1;
+  }
+
+  .run-top {
+    padding-top: max(0.4rem, env(safe-area-inset-top));
+    padding-bottom: 0.4rem;
+  }
+
+  .total-left {
+    font-size: 1.25rem;
+  }
+
+  .run-main {
+    grid-column: 1;
+    gap: 0.15rem;
+  }
+
+  .block-name {
+    font-size: 1.2rem;
+    min-height: 0;
+  }
+
+  .time {
+    font-size: clamp(2.5rem, 22vh, 5rem);
+  }
+
+  .interval-info {
+    font-size: 0.95rem;
+    min-height: 0;
+  }
+
+  /* 80vw is the whole screen once the cues take half of it. */
+  .progress {
+    width: 100%;
+    max-width: 26rem;
+    margin-top: 0.3rem;
+  }
+
+  .desc {
+    grid-column: 2;
+    width: min(45vw, 24rem);
+    max-height: none;
+    margin: 0 1rem 0 0;
+    padding: 0.6rem 0.8rem;
+  }
+
+  .run-controls {
+    padding: 0.5rem 1rem calc(0.5rem + env(safe-area-inset-bottom));
+  }
+
+  .run-controls .btn.big {
+    padding: 0.6rem;
+    font-size: 1.05rem;
+  }
 }
 
 .overlay {
