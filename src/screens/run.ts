@@ -126,12 +126,16 @@ export async function renderRun(root: HTMLElement, target: string) {
       const descIdx =
         kind === "work" || kind === "rest" ? s.block_idx : (s.next_block_idx ?? s.block_idx);
       const descBlock = plan.blocks[descIdx];
-      // Blocks without notes (e.g. quick timers) contribute nothing.
-      const notes = descBlock?.description_html
-        ? (kind === "prepare" || kind === "block_rest" ? upNextHead(descBlock.name) : "") +
-          descBlock.description_html
-        : "";
-      const aheadCue = ahead?.description_html
+      // Between parts the heading stands on its own: which part is coming is
+      // worth knowing even when it carries no cues. Mid-part, a block without
+      // notes (e.g. a quick timer) still contributes nothing.
+      const between = kind === "prepare" || kind === "block_rest";
+      const notes = between
+        ? descBlock
+          ? upNextHead(descBlock.name) + descBlock.description_html
+          : ""
+        : (descBlock?.description_html ?? "");
+      const aheadCue = ahead
         ? `<div class="up-next">${upNextHead(ahead.name)}${ahead.description_html}</div>`
         : "";
       el("desc").innerHTML = aheadCue + notes;

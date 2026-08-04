@@ -651,6 +651,11 @@ details.notes textarea {
   margin-bottom: 0.4rem;
 }
 
+/* A part with no cues leaves the heading alone in its box. */
+.next-block:last-child {
+  margin-bottom: 0;
+}
+
 /* The next part's cues, riding above the current ones through rests and the
    last interval. Boxed and brighter, because it is the thing being looked
    for. */
