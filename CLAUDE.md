@@ -139,6 +139,28 @@ legacy `.md` files migrate):
 Calendar entries embed a full markdown copy rather than referencing a template,
 so day entries are independent of the library.
 
+### Backup bundles (`core/src/bundle.rs`)
+
+One markdown file holding every stored document, so the whole app can leave the
+phone in a single tap of the Android save dialog — the private app-data dir is
+otherwise unreachable on a release build. Sections are introduced by a
+`<!-- wltimer:<kind> k=v -->` comment at the start of a line and carry their
+document *verbatim*; unlike a plan's `##` days there is no heading demotion, so
+each document is validated by the parser that reads it on its own and the round
+trip is byte-exact. Day sections carry the `DayEntry` fields that have no
+markdown slot (`status`, `completed_at`, the two source slugs) as marker
+metadata.
+
+`restore` is where the identity work pays off, and its four rules are the whole
+contract: match by id (so a second restore is a no-op), an older `updated`
+loses, a `Done` calendar entry is never replaced, and nothing is deleted for
+being absent. Two things it deliberately does *not* do: stamp restored
+documents with `now` — they keep the stamp they were exported with, which is
+the only evidence a later comparison has — and sync a restored plan to the
+calendar, since the day sections already are that record. Restoring a plan
+therefore calls `PlanStore::save` directly rather than going through
+`commands.rs::save_plan`.
+
 ## Conventions
 
 Comments here explain *why*, not what — the non-obvious constraint or the

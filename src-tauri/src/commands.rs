@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
+use wltimer_core::bundle::{self, ImportReport};
 use wltimer_core::days::{self, DayEntry, DayStatus, DayStore, DaySummary};
 use wltimer_core::engine::{Cue, Engine, Snapshot};
 use wltimer_core::ids;
@@ -466,6 +467,60 @@ pub fn sync_plan(state: State<AppState>, slug: String, today: String) -> Result<
 #[tauri::command]
 pub fn delete_plan(state: State<AppState>, slug: String) -> Result<(), String> {
     state.plans.delete(&slug)
+}
+
+// ---- backup ----
+
+#[derive(Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum BundlePreview {
+    Ok { workouts: usize, plans: usize, days: usize },
+    /// A perfectly good file that simply is not a backup — the upload falls
+    /// through to the plan and workout importers.
+    NotBundle,
+    Err { errors: Vec<ParseError> },
+}
+
+/// Everything in every store as one markdown document, for saving off the
+/// phone. The only export that captures the calendar.
+#[tauri::command]
+pub fn export_bundle(state: State<AppState>) -> String {
+    bundle::export(&state.store, &state.plans, &state.days, &now())
+}
+
+/// Check whether an upload is a backup bundle, and that all of it parses,
+/// before any of it is written.
+#[tauri::command]
+pub fn parse_bundle_preview(source: String) -> BundlePreview {
+    if !bundle::is_bundle(&source) {
+        return BundlePreview::NotBundle;
+    }
+    match bundle::parse(&source) {
+        Ok(sections) => {
+            let count = |f: fn(&bundle::Section) -> bool| sections.iter().filter(|s| f(s)).count();
+            BundlePreview::Ok {
+                workouts: count(|s| matches!(s, bundle::Section::Workout(_))),
+                plans: count(|s| matches!(s, bundle::Section::Plan { .. })),
+                days: count(|s| matches!(s, bundle::Section::Day { .. })),
+            }
+        }
+        Err(errors) => BundlePreview::Err { errors },
+    }
+}
+
+#[tauri::command]
+pub fn import_bundle(
+    state: State<AppState>,
+    source: String,
+) -> Result<ImportReport, Vec<ParseError>> {
+    let sections = bundle::parse(&source)?;
+    Ok(bundle::restore(
+        &state.store,
+        &state.plans,
+        &state.days,
+        &sections,
+        &now(),
+    ))
 }
 
 // ---- starting runs ----

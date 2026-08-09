@@ -1,4 +1,4 @@
-import { api, fmtDuration, type ParseError } from "../api";
+import { api, fmtDuration, todayStr, type ImportReport, type ParseError } from "../api";
 import { copyText } from "../clipboard";
 import { saveMarkdownFile } from "../files";
 import { FORMAT_GUIDE, PLAN_FORMAT_GUIDE } from "../format";
@@ -17,6 +17,28 @@ export function noRestChip(count: number): string {
   return count === 0
     ? ""
     : ` · <span class="meta-warn">⚠ ${count} part${count === 1 ? "" : "s"} with no rest after</span>`;
+}
+
+function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+/**
+ * What a restore did, in one line. Added and updated are one number on
+ * purpose — what the user wants to know is how much of their backup is now on
+ * the phone, not how the app happened to file each document.
+ */
+function restoreSummary(r: ImportReport): string {
+  const applied = [
+    plural(r.workouts.added + r.workouts.updated, "workout", "workouts"),
+    plural(r.plans.added + r.plans.updated, "plan", "plans"),
+    plural(r.days.added + r.days.updated, "calendar entry", "calendar entries"),
+  ].join(", ");
+  const skipped = r.workouts.skipped + r.plans.skipped + r.days.skipped;
+  let msg = `✓ restored ${applied}`;
+  if (skipped > 0) msg += ` · ${skipped} already up to date`;
+  if (r.failed > 0) msg += ` · ${plural(r.failed, "document", "documents")} could not be written`;
+  return msg;
 }
 
 /** Two-tap confirmation for destructive buttons. */
@@ -124,9 +146,22 @@ export async function renderLibrary(root: HTMLElement) {
                   .join("")
           }
         </ul>
+        <div class="section-head">
+          <h2>Backup</h2>
+          <div class="section-actions">
+            <button class="btn" id="backup">⇩ Back up all</button>
+            <button class="btn" id="restore">↺ Restore</button>
+          </div>
+        </div>
+        <div class="empty small">
+          One .md file with every workout, plan and calendar entry — save it to a
+          cloud drive. Restoring it never duplicates and never overwrites a
+          workout you have already finished.
+        </div>
       </div>
       <input type="file" id="planfile" accept=".md,.markdown,.txt" hidden>
       <input type="file" id="workoutfile" accept=".md,.markdown,.txt" hidden>
+      <input type="file" id="backupfile" accept=".md,.markdown,.txt" hidden>
       ${tabBar("library")}
     </div>`;
 
@@ -135,6 +170,10 @@ export async function renderLibrary(root: HTMLElement) {
     if (!el) return;
     el.className = `editor-status ${ok ? "valid" : "invalid"}`;
     el.textContent = msg;
+    // The status line lives between the two lists, but the buttons that write
+    // to it are scattered down the screen — a report nobody scrolls to is no
+    // report at all.
+    el.scrollIntoView({ block: "nearest" });
   }
 
   function showParseErrors(e: unknown) {
@@ -145,6 +184,39 @@ export async function renderLibrary(root: HTMLElement) {
         : String(e),
       false,
     );
+  }
+
+  /**
+   * Route an upload by what it turns out to be: a backup restores, a file of
+   * dated `##` days imports as a plan, anything else as a single workout.
+   * Shared by every upload button, so picking the "wrong" one still does the
+   * right thing with the file.
+   *
+   * The list is re-rendered *before* the message, which re-creates the status
+   * element — a report the user cannot read is the same as no report.
+   */
+  async function importUpload(text: string) {
+    try {
+      const bundle = await api.parseBundlePreview(text);
+      if (bundle.status === "err") {
+        showParseErrors(bundle.errors);
+        return;
+      }
+      let message: string;
+      if (bundle.status === "ok") {
+        message = restoreSummary(await api.importBundle(text));
+      } else if ((await api.parsePlanPreview(text)).status === "ok") {
+        const sum = await api.savePlan(text, null);
+        message = `✓ "${sum.name}" saved — ${sum.day_count} days synced to the calendar`;
+      } else {
+        const sum = await api.saveWorkout(text, null);
+        message = `✓ "${sum.name}" imported`;
+      }
+      await renderLibrary(root);
+      showStatus(message, true);
+    } catch (e) {
+      showParseErrors(e);
+    }
   }
 
   // ---- plans ----
@@ -169,10 +241,17 @@ export async function renderLibrary(root: HTMLElement) {
   planFile.addEventListener("change", async () => {
     const file = planFile.files?.[0];
     if (!file) return;
+    const text = await file.text();
+    // "Version" names the plan being replaced, so it stays a direct save;
+    // a plain upload goes through the router like every other file.
+    if (!newVersionSlug) {
+      await importUpload(text);
+      return;
+    }
     try {
-      const sum = await api.savePlan(await file.text(), newVersionSlug);
-      showStatus(`✓ "${sum.name}" saved — ${sum.day_count} days synced to the calendar`, true);
+      const sum = await api.savePlan(text, newVersionSlug);
       await renderLibrary(root);
+      showStatus(`✓ "${sum.name}" saved — ${sum.day_count} days synced to the calendar`, true);
     } catch (e) {
       showParseErrors(e);
     }
@@ -225,21 +304,7 @@ export async function renderLibrary(root: HTMLElement) {
   workoutFile.addEventListener("change", async () => {
     const file = workoutFile.files?.[0];
     if (!file) return;
-    const text = await file.text();
-    // Plan files (dated ## headings) import as plans, not single workouts.
-    const planCheck = await api.parsePlanPreview(text);
-    try {
-      if (planCheck.status === "ok") {
-        const sum = await api.savePlan(text, null);
-        showStatus(`✓ "${sum.name}" saved — ${sum.day_count} days synced to the calendar`, true);
-      } else {
-        const sum = await api.saveWorkout(text, null);
-        showStatus(`✓ "${sum.name}" imported`, true);
-      }
-      await renderLibrary(root);
-    } catch (e) {
-      showParseErrors(e);
-    }
+    await importUpload(await file.text());
   });
 
   root.querySelectorAll<HTMLButtonElement>("button.copy").forEach((btn) => {
@@ -270,5 +335,22 @@ export async function renderLibrary(root: HTMLElement) {
       await api.deleteWorkout(btn.dataset.slug!);
       await renderLibrary(root);
     });
+  });
+
+  // ---- backup ----
+
+  const backupFile = root.querySelector<HTMLInputElement>("#backupfile")!;
+
+  root.querySelector("#backup")!.addEventListener("click", async () => {
+    // Dated, so successive backups sit beside each other in the drive folder
+    // rather than each one replacing the last.
+    saveMarkdownFile(`wltimer-backup-${todayStr()}.md`, await api.exportBundle());
+    showStatus("✓ backup saved — keep it somewhere off the phone", true);
+  });
+  root.querySelector("#restore")!.addEventListener("click", () => backupFile.click());
+  backupFile.addEventListener("change", async () => {
+    const file = backupFile.files?.[0];
+    if (!file) return;
+    await importUpload(await file.text());
   });
 }

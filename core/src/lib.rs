@@ -1,3 +1,4 @@
+pub mod bundle;
 pub mod days;
 pub mod engine;
 pub mod ids;

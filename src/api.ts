@@ -70,6 +70,26 @@ export type ParseFull =
   | { status: "ok"; workout: Workout }
   | { status: "err"; errors: ParseError[] };
 
+/** What a restore did to one kind of document. */
+export interface Counts {
+  added: number;
+  updated: number;
+  /** Left alone: what is stored is newer, or it is a finished day. */
+  skipped: number;
+}
+
+export interface ImportReport {
+  workouts: Counts;
+  plans: Counts;
+  days: Counts;
+  failed: number;
+}
+
+export type BundlePreview =
+  | { status: "ok"; workouts: number; plans: number; days: number }
+  | { status: "not_bundle" }
+  | { status: "err"; errors: ParseError[] };
+
 export type DayStatus = "planned" | "done";
 
 export interface DayEntryInfo {
@@ -231,6 +251,11 @@ export const api = {
     invoke<PlanSummary>("save_plan", { source, prevSlug, today: todayStr() }),
   syncPlan: (slug: string) => invoke<number>("sync_plan", { slug, today: todayStr() }),
   deletePlan: (slug: string) => invoke<void>("delete_plan", { slug }),
+  /** The whole library, plans and calendar as one markdown document. */
+  exportBundle: () => invoke<string>("export_bundle"),
+  parseBundlePreview: (source: string) =>
+    invoke<BundlePreview>("parse_bundle_preview", { source }),
+  importBundle: (source: string) => invoke<ImportReport>("import_bundle", { source }),
   pause: () => invoke<void>("pause_timer"),
   resume: () => invoke<void>("resume_timer"),
   /** Leave the run screen; an unfinished run is kept as a resumable session. */

@@ -115,6 +115,65 @@ in place. Finishing any run records it on that day (planned entries flip to
 done with a timestamp; library/one-off runs append a done entry). Entries can
 be moved between days and explicitly promoted into the library.
 
+## Backup
+
+Everything the app holds lives in its private app-data directory, which no
+file manager can reach and no `adb` command can pull off a release build. The
+only way your workouts exist anywhere but this phone is to export them.
+
+**Workouts → Backup → ⇩ Back up all** writes one `.md` file —
+`wltimer-backup-2026-08-09.md` — containing every library workout, every plan,
+and every calendar entry, done and planned. On Android that opens the system
+save dialog, so picking Drive, Dropbox or Nextcloud as the destination puts it
+off the phone in one action. The name carries the date, so successive backups
+sit beside each other in the folder instead of replacing one another.
+
+**↺ Restore** reads one back. So does either 📂 Upload button — a backup file
+is recognised by what it is, not by which button you used.
+
+What a restore will and will not do:
+
+- **It never duplicates.** Every document is matched by the `- id:` it carries,
+  so restoring the same file twice changes nothing the second time.
+- **It never overwrites something newer.** A document whose `- updated:` stamp
+  is older than the copy already on the phone is left alone and counted as
+  "already up to date".
+- **It never replaces a workout you have finished.** A done calendar entry is
+  the record of what you actually did; nothing in a backup can overwrite it.
+  A *planned* entry, though, is happily replaced by the finished version of
+  itself — that is how a rebuilt phone gets its history back.
+- **It never deletes.** Anything on the phone but absent from the backup stays.
+  Restoring merges; it does not reset the app to the backup's state.
+- **Restored documents keep their own timestamps.** A restore is not an edit,
+  so it does not stamp your whole library with the moment you restored it.
+- **A restored plan does not re-sync the calendar.** The backup's day entries
+  are the record of what was scheduled, and re-planning on top of them would
+  overwrite it.
+
+Nothing is written until the whole file has parsed, so a damaged backup fails
+with a line number instead of half-restoring.
+
+The format is the same markdown as everything else, with each document
+introduced by a comment line naming what it is:
+
+```markdown
+<!-- wltimer:backup exported=2026-08-09T13:45:31Z -->
+
+<!-- wltimer:workout -->
+# Monday Squats
+- id: 9f2c8e1a-4b7d-4c2e-9a11-6f0d3e5b8c74
+...
+
+<!-- wltimer:day date=2026-08-09 status=done completed=2026-08-09T18:22:10Z -->
+# Monday Squats
+- id: 4b7d3e5b-8c74-4c2e-9a11-6f0d3e5b8c74
+...
+```
+
+Each section holds its document unchanged, so a backup can be read, edited and
+re-imported like any other `.md` — and a section can simply be cut out of one
+and uploaded on its own.
+
 ## Storage
 
 All app data lives in the private app-data directory, zstd-compressed
