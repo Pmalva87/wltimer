@@ -160,3 +160,4 @@ Android's app settings erases it too.
 | `INSTALL_FAILED_NO_MATCHING_ABIS` | The APK has no build for that phone's CPU. `npm run android:apk` targets `aarch64` (every modern phone); an x86 emulator needs `--target x86_64`. |
 | Tapping the APK does nothing | The file manager lacks "install unknown apps" permission, or the download was truncated — re-download and compare sizes. |
 | App installs but the screen sleeps mid-workout | The `FLAG_KEEP_SCREEN_ON` patch in `MainActivity.kt` was lost by regenerating `src-tauri/gen/android`. See the README. |
+| Exporting a workout does nothing, or the file never appears | The other `MainActivity.kt` patch — the `FileSaver` bridge — was lost the same way, so the app fell back to a browser download. Same fix, same place. |

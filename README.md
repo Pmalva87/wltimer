@@ -148,9 +148,16 @@ adb install src-tauri/gen/android/app/build/outputs/apk/universal/release/wltime
 distinct filename — useful when sideloading via a cloud share, since some
 downloaders/browsers reuse a cached file for a name they've already fetched.
 
-The generated Android project (`src-tauri/gen/android`) carries one manual
-patch: `FLAG_KEEP_SCREEN_ON` in `MainActivity.kt`, so the screen stays awake
-during a workout.
+The generated Android project (`src-tauri/gen/android`) carries two manual
+patches, both in `MainActivity.kt`:
+
+- `FLAG_KEEP_SCREEN_ON`, so the screen stays awake during a workout.
+- a `FileSaver` JavaScript bridge exposing `window.WltimerFiles`, so exporting
+  a `.md` goes through Android's system file picker. Without it `src/files.ts`
+  falls back to its anchor-download path, which is meant for the desktop
+  preview and gives the phone no way to place the file.
+
+Regenerating that directory drops both, silently.
 
 ## Install on a phone
 
