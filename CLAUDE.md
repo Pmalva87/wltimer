@@ -91,17 +91,37 @@ still resumes.
 a `Day` origin flips that calendar entry to done, `Library`/`Adhoc` append a new
 done entry. It also produces the `#/run/<target>` route string.
 
-### Identity (`core/src/ids.rs`)
+### Identity and version (`core/src/ids.rs`, `core/src/time.rs`)
 
-Every stored workout carries a UUID as an `- id:` bullet under its title,
-inside the markdown itself. Reading is tolerant (hand-written files need no id);
-writing is not — the stores call `ensure_id` so nothing reaches disk without
-one. This is what makes re-import update rather than duplicate, and what lets a
+Every stored document carries two preamble bullets under its title: `- id:` (a
+UUID) and `- updated:` (when it last changed). Both live in the markdown so
+they survive leaving the device, where a filename and an mtime do not. Reading
+is tolerant — hand-written files need neither, and a malformed value reads as
+absent rather than stranding the file — but writing is not: the stores call
+`ensure_id` and `set_updated` so nothing reaches disk without both.
+
+The id is what makes re-import update rather than duplicate, and what lets a
 plan sync match the days it scheduled last time — including recognising a day
 you already finished, which a sync must never replace. Copies (scheduling a
 template, promoting a day entry, recording a finished run) mint a *new* id.
-When adding a code path that writes a workout, decide explicitly whether it
-preserves the id or mints one.
+**When adding a code path that writes a workout, decide explicitly whether it
+preserves the id or mints one.** The timestamp needs no such care: every write
+overwrites it, which is also why it is not on the `Workout` model — it never
+has to survive an edit round-trip, and a second copy in the model could drift
+from the document. Calendar entries follow the same rule for the same reason
+(`days.rs:60`).
+
+`core` cannot read the wall clock — `chrono` is pulled in without its `clock`
+feature — so every store write takes a `now` from the shell, the way `Engine`
+takes `Instant`s. `commands.rs::now()` is the single source. Timestamps are
+canonical UTC at second precision so that string order is chronological order;
+`time::canonical` normalises anything else on the way in.
+
+The migrations in each store's `new()` read file mtimes **before** running,
+because the id backfill rewrites files and would otherwise stamp the whole
+library with the moment of the upgrade. Calendar entries never inherit their
+own date — a workout planned for next month would take a stamp in the future
+and beat every later edit.
 
 ### Storage
 

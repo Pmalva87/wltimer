@@ -75,6 +75,14 @@ fn local_date() -> String {
     chrono::Local::now().format("%Y-%m-%d").to_string()
 }
 
+/// The moment, in the canonical form every stored timestamp uses (UTC, second
+/// precision — see `wltimer_core::time`). `core` deliberately cannot read the
+/// clock, so this is the app's single answer to what time it is, and the only
+/// thing that stamps documents as changed.
+fn now() -> String {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+}
+
 /// Use the frontend-supplied date when it is well-formed, else fall back to
 /// the device clock.
 fn date_or_local(date: &str) -> String {
@@ -115,7 +123,7 @@ pub fn save_workout(
     source: String,
     prev_slug: Option<String>,
 ) -> Result<WorkoutSummary, Vec<ParseError>> {
-    state.store.save(&source, prev_slug.as_deref())
+    state.store.save(&source, prev_slug.as_deref(), &now())
 }
 
 /// Copy a library workout into a second, independent workout.
@@ -133,7 +141,7 @@ pub fn duplicate_workout(
         .read_source(&slug)
         .map_err(|message| vec![ParseError { line: 1, message }])?;
     let (source, _) = ids::with_new_id(&source);
-    state.store.save(&source, None)
+    state.store.save(&source, None, &now())
 }
 
 #[tauri::command]
@@ -270,7 +278,7 @@ pub fn add_day_entry(
     let (source, _) = ids::ensure_id(&source);
     state
         .days
-        .add(&date, planned_entry(source, None))
+        .add(&date, planned_entry(source, None), &now())
         .map_err(|message| vec![ParseError { line: 1, message }])
 }
 
@@ -285,7 +293,9 @@ pub fn add_day_from_library(
     // A scheduled copy is a new occurrence, not the template: it gets its own
     // id so the two never collide. Provenance stays in `source_slug`.
     let (source, _) = ids::with_new_id(&source);
-    state.days.add(&date, planned_entry(source, Some(slug)))
+    state
+        .days
+        .add(&date, planned_entry(source, Some(slug)), &now())
 }
 
 #[tauri::command]
@@ -299,7 +309,7 @@ pub fn update_day_entry(
     parser::parse_workout(&source)?;
     state
         .days
-        .update(&date, index, |e| {
+        .update(&date, index, &now(), |e| {
             // Editing an entry must not re-mint its identity, or the next plan
             // sync would no longer recognise it. A document arriving without an
             // id inherits the one the entry already had.
@@ -326,7 +336,7 @@ pub fn move_day_entry(
 ) -> Result<(), String> {
     check_date(&from_date)?;
     check_date(&to_date)?;
-    state.days.move_entry(&from_date, index, &to_date)
+    state.days.move_entry(&from_date, index, &to_date, &now())
 }
 
 /// Repeat a day entry on another date (used by Re-Run on a finished workout).
@@ -349,7 +359,11 @@ pub fn repeat_day_entry(
     let (source, _) = ids::with_new_id(&entry.markdown);
     state
         .days
-        .add(&to_date, planned_entry(source, entry.source_slug.clone()))
+        .add(
+            &to_date,
+            planned_entry(source, entry.source_slug.clone()),
+            &now(),
+        )
 }
 
 /// Save a day entry's workout into the library (explicit opt-in).
@@ -367,7 +381,7 @@ pub fn promote_day_entry(
     // The library template is a new object, distinct from the dated entry it
     // was taken from, so it gets its own id rather than sharing the entry's.
     let (source, _) = ids::with_new_id(&entry.markdown);
-    state.store.save(&source, None)
+    state.store.save(&source, None, &now())
 }
 
 // ---- training plans ----
@@ -386,7 +400,7 @@ fn sync_upcoming(state: &AppState, slug: &str, plan: &Plan, from: &str) -> usize
         })
         .collect();
 
-    let (synced, dirty) = plan::merge_into_calendar(plan, slug, from, &mut by_date);
+    let (synced, dirty) = plan::merge_into_calendar(plan, slug, from, &now(), &mut by_date);
 
     for date in dirty {
         let entries = by_date.get(&date).map(Vec::as_slice).unwrap_or(&[]);
@@ -434,7 +448,7 @@ pub fn save_plan(
     prev_slug: Option<String>,
     today: String,
 ) -> Result<PlanSummary, Vec<ParseError>> {
-    let (summary, plan) = state.plans.save(&source, prev_slug.as_deref())?;
+    let (summary, plan) = state.plans.save(&source, prev_slug.as_deref(), &now())?;
     sync_upcoming(&state, &summary.slug, &plan, &date_or_local(&today));
     Ok(summary)
 }
@@ -688,7 +702,9 @@ fn record_finished(state: &AppState, engine: &Engine) {
     };
     let markdown = parser::workout_to_markdown(workout);
     let origin = std::mem::replace(&mut *state.origin.lock().unwrap(), RunOrigin::None);
-    let now = chrono::Local::now().to_rfc3339();
+    // One reading of the clock for the whole recording, so the entry's
+    // `completed_at` and the version stamp on its document agree.
+    let now = now();
     let done = |markdown: String, source_slug: Option<String>| DayEntry {
         // A finished run is its own occurrence on the calendar, distinct from
         // the library template it was started from, so it gets its own id.
@@ -704,21 +720,21 @@ fn record_finished(state: &AppState, engine: &Engine) {
         RunOrigin::Day { date, index } => {
             let updated = state
                 .days
-                .update(&date, index, |e| {
+                .update(&date, index, &now, |e| {
                     e.status = DayStatus::Done;
                     e.completed_at = Some(now.clone());
                 })
                 .is_ok();
             if !updated {
                 // The scheduled entry vanished mid-run; still record the work.
-                let _ = state.days.add(&date, done(markdown, None));
+                let _ = state.days.add(&date, done(markdown, None), &now);
             }
         }
         RunOrigin::Library { date, slug } => {
-            let _ = state.days.add(&date, done(markdown, Some(slug)));
+            let _ = state.days.add(&date, done(markdown, Some(slug)), &now);
         }
         RunOrigin::Adhoc { date } => {
-            let _ = state.days.add(&date, done(markdown, None));
+            let _ = state.days.add(&date, done(markdown, None), &now);
         }
         RunOrigin::None => {}
     }

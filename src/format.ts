@@ -18,6 +18,9 @@ Rules:
     UUID, or the import will overwrite the original.
   - If you omit it entirely the file still imports, and the app assigns an id on
     save — but then it imports as a brand-new workout every time.
+- \`- updated: <timestamp>\` — app-managed; leave it alone. It records when the
+  document last changed, as UTC RFC 3339 (\`2026-08-09T13:45:31Z\`), and the app
+  rewrites it on every save. Omit it when writing a new workout by hand.
 - \`## Heading\` — starts an exercise block. At least one block is required.
 - Inside a block, bullet lines of the form \`- key: value\` set parameters.
   Recognized keys (all optional except \`work\`):
@@ -62,6 +65,10 @@ workout per dated day on its calendar.
 Rules:
 
 - \`# Plan Name\` — exactly one, first heading in the file. Required.
+- \`- updated: <timestamp>\` — app-managed; leave it alone. Sits under the plan
+  title, records when the plan file last changed as UTC RFC 3339
+  (\`2026-08-09T13:45:31Z\`), and is rewritten on every save. Omit it when
+  writing a new plan by hand.
 - \`## YYYY-MM-DD: Day Name\` — one section per training day. The date is
   required, must be unique within the plan, and days need not be consecutive
   (skipped dates are rest days).

@@ -6,4 +6,5 @@ pub mod parser;
 pub mod plan;
 pub mod session;
 pub mod store;
+pub mod time;
 pub mod zio;

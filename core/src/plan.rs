@@ -181,6 +181,7 @@ pub fn merge_into_calendar(
     plan: &Plan,
     slug: &str,
     from: &str,
+    now: &str,
     by_date: &mut BTreeMap<String, Vec<DayEntry>>,
 ) -> (usize, BTreeSet<String>) {
     let mut dirty: BTreeSet<String> = BTreeSet::new();
@@ -205,7 +206,7 @@ pub fn merge_into_calendar(
                 }
                 let mut entry = by_date.get_mut(&date).unwrap().remove(i);
                 dirty.insert(date);
-                entry.markdown = day.workout_md.clone();
+                entry.markdown = ids::set_updated(&day.workout_md, now);
                 entry.source_plan = Some(slug.to_string());
                 // Re-dated in the plan file? The entry moves and keeps its id
                 // (and so its identity) rather than being destroyed and rebuilt.
@@ -228,7 +229,7 @@ pub fn merge_into_calendar(
                     continue;
                 }
                 by_date.entry(day.date.clone()).or_default().push(DayEntry {
-                    markdown: day.workout_md.clone(),
+                    markdown: ids::set_updated(&day.workout_md, now),
                     status: DayStatus::Planned,
                     completed_at: None,
                     source_slug: None,
@@ -291,12 +292,14 @@ impl PlanStore {
     pub fn new(dir: PathBuf) -> std::io::Result<Self> {
         fs::create_dir_all(&dir)?;
         let store = PlanStore { dir };
-        store.backfill_day_ids();
+        store.backfill_day_ids_and_updated();
         Ok(store)
     }
 
-    /// One-time migration for plans saved before day ids existed.
-    fn backfill_day_ids(&self) {
+    /// One-time migration for plans saved before day ids, or before `updated`,
+    /// existed. Both in one pass over the directory: the mtime a plan inherits
+    /// has to be read before this function's own rewrite replaces it.
+    fn backfill_day_ids_and_updated(&self) {
         let Ok(entries) = fs::read_dir(&self.dir) else {
             return;
         };
@@ -305,9 +308,19 @@ impl PlanStore {
             let Ok(source) = zio::read_text(&path) else {
                 continue;
             };
-            let with_ids = ensure_day_ids(&source);
-            if with_ids != source {
-                let _ = zio::write_compressed(&path, with_ids.as_bytes());
+            let mtime = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(crate::time::from_system_time);
+            let mut updated = ensure_day_ids(&source);
+            if ids::extract_updated(&updated).is_none() {
+                if let Some(mtime) = mtime {
+                    updated = ids::set_updated(&updated, &mtime);
+                }
+            }
+            if updated != source {
+                let _ = zio::write_compressed(&path, updated.as_bytes());
             }
         }
     }
@@ -359,7 +372,12 @@ impl PlanStore {
 
     /// Validate and write; name collisions with other plans get a counter,
     /// like workout saves.
-    pub fn save(&self, source: &str, prev_slug: Option<&str>) -> Result<(PlanSummary, Plan), Vec<ParseError>> {
+    pub fn save(
+        &self,
+        source: &str,
+        prev_slug: Option<&str>,
+        now: &str,
+    ) -> Result<(PlanSummary, Plan), Vec<ParseError>> {
         // Validate what the user wrote (so error lines match their file), then
         // re-parse with ids in place so the returned Plan carries the same ids
         // that were written to disk — sync matches on them.
@@ -382,6 +400,7 @@ impl PlanStore {
         } else {
             retitle(source, &name)
         };
+        let source = ids::set_updated(&source, now);
         zio::write_compressed(&self.path(&slug), source.as_bytes())
             .map_err(|e| vec![err(1, format!("cannot save plan: {e}"))])?;
         if let Some(prev) = prev_slug {
@@ -408,6 +427,8 @@ impl PlanStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const NOW: &str = "2026-08-09T13:45:31Z";
 
     const PLAN: &str = "\
 # 531 Cycle 1
@@ -477,15 +498,15 @@ Brace hard.
         let dir = std::env::temp_dir().join(format!("wltimer-plans-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         let s = PlanStore::new(dir).unwrap();
-        let (sum, plan) = s.save(PLAN, None).unwrap();
+        let (sum, plan) = s.save(PLAN, None, NOW).unwrap();
         assert_eq!(sum.slug, "531-cycle-1");
         assert_eq!(sum.day_count, 2);
         assert_eq!(sum.first_date, "2026-07-30");
         assert_eq!(plan.days.len(), 2);
-        let (dup, _) = s.save(PLAN, None).unwrap();
+        let (dup, _) = s.save(PLAN, None, NOW).unwrap();
         assert_eq!(dup.slug, "531-cycle-1-2");
         // Re-saving under its own slug replaces in place.
-        let (resaved, _) = s.save(PLAN, Some("531-cycle-1")).unwrap();
+        let (resaved, _) = s.save(PLAN, Some("531-cycle-1"), NOW).unwrap();
         assert_eq!(resaved.slug, "531-cycle-1");
         assert_eq!(s.list().len(), 2);
         s.delete("531-cycle-1-2").unwrap();
@@ -503,13 +524,13 @@ Brace hard.
     /// Save the plan so its days get ids, and return the stored Plan.
     fn saved_plan(tag: &str) -> (PlanStore, Plan) {
         let s = plan_store(tag);
-        let (_, plan) = s.save(PLAN, None).unwrap();
+        let (_, plan) = s.save(PLAN, None, NOW).unwrap();
         (s, plan)
     }
 
     fn calendar(plan: &Plan, slug: &str) -> BTreeMap<String, Vec<DayEntry>> {
         let mut by_date = BTreeMap::new();
-        merge_into_calendar(plan, slug, "2026-07-01", &mut by_date);
+        merge_into_calendar(plan, slug, "2026-07-01", NOW, &mut by_date);
         by_date
     }
 
@@ -532,9 +553,9 @@ Brace hard.
     #[test]
     fn saving_a_plan_twice_keeps_the_same_day_ids() {
         let s = plan_store("stable");
-        let (_, first) = s.save(PLAN, None).unwrap();
+        let (_, first) = s.save(PLAN, None, NOW).unwrap();
         let stored = s.read_source("531-cycle-1").unwrap();
-        let (_, again) = s.save(&stored, Some("531-cycle-1")).unwrap();
+        let (_, again) = s.save(&stored, Some("531-cycle-1"), NOW).unwrap();
         assert_eq!(
             first.days.iter().map(|d| d.id.clone()).collect::<Vec<_>>(),
             again.days.iter().map(|d| d.id.clone()).collect::<Vec<_>>()
@@ -558,7 +579,7 @@ Brace hard.
         assert_eq!(all_entries(&cal).len(), 2);
 
         // Re-syncing the same plan must update, never accumulate.
-        let (synced, _) = merge_into_calendar(&plan, "531-cycle-1", "2026-07-01", &mut cal);
+        let (synced, _) = merge_into_calendar(&plan, "531-cycle-1", "2026-07-01", NOW, &mut cal);
         assert_eq!(synced, 2);
         assert_eq!(all_entries(&cal).len(), 2);
     }
@@ -570,7 +591,7 @@ Brace hard.
         // the existing entries rather than double-book every date.
         let (_, plan) = saved_plan("reupload");
         let mut cal = calendar(&plan, "531-cycle-1");
-        merge_into_calendar(&plan, "531-cycle-1-2", "2026-07-01", &mut cal);
+        merge_into_calendar(&plan, "531-cycle-1-2", "2026-07-01", NOW, &mut cal);
         assert_eq!(all_entries(&cal).len(), 2);
     }
 
@@ -585,7 +606,7 @@ Brace hard.
             days::entry_id(entry).unwrap()
         };
 
-        merge_into_calendar(&plan, "531-cycle-1", "2026-07-01", &mut cal);
+        merge_into_calendar(&plan, "531-cycle-1", "2026-07-01", NOW, &mut cal);
 
         let day = &cal["2026-07-30"];
         assert_eq!(day.len(), 1, "a done workout must not gain a planned twin");
@@ -601,8 +622,8 @@ Brace hard.
         let id = days::entry_id(&cal["2026-07-30"][0]).unwrap();
 
         let moved = store.read_source("531-cycle-1").unwrap().replace("2026-07-30", "2026-07-31");
-        let (_, moved) = store.save(&moved, Some("531-cycle-1")).unwrap();
-        merge_into_calendar(&moved, "531-cycle-1", "2026-07-01", &mut cal);
+        let (_, moved) = store.save(&moved, Some("531-cycle-1"), NOW).unwrap();
+        merge_into_calendar(&moved, "531-cycle-1", "2026-07-01", NOW, &mut cal);
 
         assert!(cal.get("2026-07-30").is_none_or(|e| e.is_empty()));
         assert_eq!(days::entry_id(&cal["2026-07-31"][0]).unwrap(), id, "identity survives the move");
@@ -614,8 +635,8 @@ Brace hard.
         let mut cal = calendar(&plan, "531-cycle-1");
 
         let edited = store.read_source("531-cycle-1").unwrap().replace("- work: 2:00", "- work: 2:30");
-        let (_, edited) = store.save(&edited, Some("531-cycle-1")).unwrap();
-        merge_into_calendar(&edited, "531-cycle-1", "2026-07-01", &mut cal);
+        let (_, edited) = store.save(&edited, Some("531-cycle-1"), NOW).unwrap();
+        merge_into_calendar(&edited, "531-cycle-1", "2026-07-01", NOW, &mut cal);
 
         assert_eq!(all_entries(&cal).len(), 2);
         assert!(cal["2026-07-30"][0].markdown.contains("- work: 2:30"));
@@ -628,8 +649,8 @@ Brace hard.
 
         let source = store.read_source("531-cycle-1").unwrap();
         let trimmed = &source[..source.find("## 2026-08-01").unwrap()];
-        let (_, shorter) = store.save(trimmed, Some("531-cycle-1")).unwrap();
-        merge_into_calendar(&shorter, "531-cycle-1", "2026-07-01", &mut cal);
+        let (_, shorter) = store.save(trimmed, Some("531-cycle-1"), NOW).unwrap();
+        merge_into_calendar(&shorter, "531-cycle-1", "2026-07-01", NOW, &mut cal);
 
         assert_eq!(all_entries(&cal).len(), 1);
         assert!(cal.get("2026-08-01").is_none_or(|e| e.is_empty()));
@@ -647,7 +668,7 @@ Brace hard.
             source_plan: None,
         });
 
-        merge_into_calendar(&plan, "531-cycle-1", "2026-07-01", &mut cal);
+        merge_into_calendar(&plan, "531-cycle-1", "2026-07-01", NOW, &mut cal);
 
         assert_eq!(cal["2026-07-30"].len(), 2);
         assert!(cal["2026-07-30"].iter().any(|e| e.markdown.contains("# Mine")));
@@ -657,7 +678,7 @@ Brace hard.
     fn merge_ignores_dates_before_the_cutoff() {
         let (_, plan) = saved_plan("cutoff");
         let mut cal = BTreeMap::new();
-        let (synced, _) = merge_into_calendar(&plan, "531-cycle-1", "2026-08-01", &mut cal);
+        let (synced, _) = merge_into_calendar(&plan, "531-cycle-1", "2026-08-01", NOW, &mut cal);
         assert_eq!(synced, 1);
         assert!(!cal.contains_key("2026-07-30"));
     }

@@ -62,6 +62,9 @@ Cues: brace hard, hit depth, drive up fast.
 - `# Title` — workout name (required)
 - `- id:` — a UUID under the title identifying this workout. Optional in a file
   you write by hand; the app adds one when it saves. See [Identity](#identity).
+- `- updated:` — when the document last changed, UTC (`2026-08-09T13:45:31Z`).
+  App-managed: rewritten on every save, and nothing you need to write by hand.
+  See [Identity](#identity).
 - `## Heading` — starts an exercise block (at least one required)
 - Bullet params per block: `work` (required), `intervals` (default 1), `rest`,
   `rest after`, `color`. Times are seconds (`90`) or `M:SS` (`1:30`).
@@ -70,7 +73,19 @@ Cues: brace hard, hit depth, drive up fast.
 ## Identity
 
 Every stored workout carries a UUID in its own markdown, so identity travels
-with the file rather than with its filename or its position in a list:
+with the file rather than with its filename or its position in a list. It also
+carries the time it last changed, as `- updated:`, for the same reason and in
+the same place: a file that leaves the phone loses its filesystem timestamp, so
+the only version marker that survives an export is one written inside the
+document.
+
+Identity answers "is this the same workout"; the timestamp answers what
+identity cannot — "is this copy newer than the one already here". Comparing two
+copies is a plain string comparison, because every stamp is written in one
+canonical form (UTC, whole seconds) chosen so that alphabetical order *is*
+chronological order.
+
+What identity buys you:
 
 - Re-importing a workout you exported and edited elsewhere **updates the
   original** instead of adding "Squats (2)". A file with no id is treated as a
@@ -85,7 +100,12 @@ with the file rather than with its filename or its position in a list:
   a new id, so no two objects ever claim the same one.
 
 Workouts, plans and calendar entries saved before ids existed are given one
-automatically the first time the app opens after upgrading.
+automatically the first time the app opens after upgrading. The same pass fills
+in missing timestamps, from the best evidence still on disk: a finished
+workout's own completion time, and otherwise the file's last-modified date.
+Anything with no evidence at all is left unstamped rather than given a guessed
+date — an absent stamp reads as "oldest", so it loses a comparison instead of
+winning one it has not earned.
 
 ## Calendar
 
