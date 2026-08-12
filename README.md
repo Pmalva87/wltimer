@@ -111,9 +111,12 @@ winning one it has not earned.
 
 The 📅 calendar schedules workouts on dates: upload a `.md`, pick from the
 library (a **copy** — day entries are independent of templates), or build one
-in place. Finishing any run records it on that day (planned entries flip to
-done with a timestamp; library/one-off runs append a done entry). Entries can
-be moved between days and explicitly promoted into the library.
+in place. Finishing any run records it on the day you did it (planned entries
+flip to done with a timestamp; library/one-off runs append a done entry). A
+workout you finish on a different day than it was planned for **moves to the
+day you did it**, keeping its id — the calendar records what happened, not what
+was scheduled, and a plan re-sync still recognises the day as finished. Entries
+can be moved between days and explicitly promoted into the library.
 
 ## Backup
 

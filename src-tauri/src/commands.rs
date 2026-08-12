@@ -337,7 +337,10 @@ pub fn move_day_entry(
 ) -> Result<(), String> {
     check_date(&from_date)?;
     check_date(&to_date)?;
-    state.days.move_entry(&from_date, index, &to_date, &now())
+    state
+        .days
+        .move_entry(&from_date, index, &to_date, &now())
+        .map(|_| ())
 }
 
 /// Repeat a day entry on another date (used by Re-Run on a finished workout).
@@ -773,16 +776,24 @@ fn record_finished(state: &AppState, engine: &Engine) {
     };
     match origin {
         RunOrigin::Day { date, index } => {
-            let updated = state
+            // The calendar records what happened, so a workout scheduled for
+            // another day moves to the day it was actually done rather than
+            // ticking off a date nobody trained on. It keeps its id through
+            // the move, which is how a plan sync still recognises it as the
+            // day it scheduled — and so leaves the finished work alone.
+            let today = local_date();
+            let recorded = state
                 .days
-                .update(&date, index, &now, |e| {
-                    e.status = DayStatus::Done;
-                    e.completed_at = Some(now.clone());
-                })
-                .is_ok();
-            if !updated {
+                .move_entry(&date, index, &today, &now)
+                .and_then(|index| {
+                    state.days.update(&today, index, &now, |e| {
+                        e.status = DayStatus::Done;
+                        e.completed_at = Some(now.clone());
+                    })
+                });
+            if recorded.is_err() {
                 // The scheduled entry vanished mid-run; still record the work.
-                let _ = state.days.add(&date, done(markdown, None), &now);
+                let _ = state.days.add(&today, done(markdown, None), &now);
             }
         }
         RunOrigin::Library { date, slug } => {

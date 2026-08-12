@@ -230,14 +230,25 @@ impl DayStore {
         self.save(date, &entries)
     }
 
-    /// Move an entry (with its status/metadata) from one date to another.
+    /// Move an entry (with its status/metadata) from one date to another;
+    /// returns its index within the destination day.
     pub fn move_entry(
         &self,
         from_date: &str,
         index: usize,
         to_date: &str,
         now: &str,
-    ) -> Result<(), String> {
+    ) -> Result<usize, String> {
+        // Moving an entry to the day it is already on changes nothing: doing
+        // it the long way would shuffle it to the end of the day and stamp it
+        // as edited, which a plan sync would then have to explain.
+        if from_date == to_date {
+            return if index < self.load(from_date).len() {
+                Ok(index)
+            } else {
+                Err(format!("no entry {index} on {from_date}"))
+            };
+        }
         let mut from = self.load(from_date);
         if index >= from.len() {
             return Err(format!("no entry {index} on {from_date}"));
@@ -250,7 +261,8 @@ impl DayStore {
         to.push(entry);
         // Write destination first so a failure can't lose the entry.
         self.save(to_date, &to)?;
-        self.save(from_date, &from)
+        self.save(from_date, &from)?;
+        Ok(to.len() - 1)
     }
 
     /// All stored dates on or after `from`, ascending.
@@ -377,14 +389,31 @@ mod tests {
     #[test]
     fn move_between_days() {
         let s = temp_store("move");
+        s.add("2026-07-30", entry(MD), NOW).unwrap();
         s.add("2026-07-28", entry(MD), NOW).unwrap();
-        s.move_entry("2026-07-28", 0, "2026-07-30", LATER).unwrap();
+        let index = s.move_entry("2026-07-28", 0, "2026-07-30", LATER).unwrap();
         assert!(s.load("2026-07-28").is_empty());
         let moved = s.load("2026-07-30");
-        assert_eq!(moved.len(), 1);
-        assert!(moved[0].markdown.contains("- work: 30"));
+        assert_eq!(moved.len(), 2);
+        // The index is where the entry landed, so the caller can go on
+        // working with it — that is how a finished run marks itself done.
+        assert_eq!(index, 1);
+        assert!(moved[index].markdown.contains("- work: 30"));
         // Rescheduling is a change, so the entry's version moves with it.
-        assert_eq!(entry_updated(&moved[0]).as_deref(), Some(LATER));
+        assert_eq!(entry_updated(&moved[index]).as_deref(), Some(LATER));
+    }
+
+    #[test]
+    fn moving_to_the_same_day_leaves_the_entry_where_it_is() {
+        let s = temp_store("move-noop");
+        s.add("2026-07-28", entry(MD), NOW).unwrap();
+        s.add("2026-07-28", entry(MD), NOW).unwrap();
+        assert_eq!(s.move_entry("2026-07-28", 0, "2026-07-28", LATER), Ok(0));
+        let entries = s.load("2026-07-28");
+        assert_eq!(entries.len(), 2);
+        // Neither reordered nor stamped as edited.
+        assert_eq!(entry_updated(&entries[0]).as_deref(), Some(NOW));
+        assert!(s.move_entry("2026-07-28", 2, "2026-07-28", LATER).is_err());
     }
 
     #[test]

@@ -88,8 +88,10 @@ is dropped and the workout starts over. `Engine::restore` clamps a
 still resumes.
 
 `RunOrigin` is the one piece of state that decides what finishing a run *means*:
-a `Day` origin flips that calendar entry to done, `Library`/`Adhoc` append a new
-done entry. It also produces the `#/run/<target>` route string.
+a `Day` origin flips that calendar entry to done — moving it to the day it was
+actually finished first, if that is not the day it was scheduled for —
+while `Library`/`Adhoc` append a new done entry. It also produces the
+`#/run/<target>` route string.
 
 ### Identity and version (`core/src/ids.rs`, `core/src/time.rs`)
 
