@@ -184,6 +184,14 @@ trip is byte-exact. Day sections carry the `DayEntry` fields that have no
 markdown slot (`status`, `completed_at`, the two source slugs) as marker
 metadata.
 
+A scheduled plan day is therefore in the file **twice** — once inside its plan
+document, once as the calendar entry it created. That redundancy is deliberate
+and was reconsidered and kept: a day section could carry a reference to its plan
+day instead, but then it would no longer be a document that stands on its own,
+and a damaged or hand-trimmed plan section would take its days down with it.
+The file you rely on when the phone is gone is the wrong place to trade
+independence for size.
+
 `restore` is where the identity work pays off, and its four rules are the whole
 contract: match by id (so a second restore is a no-op), an older `updated`
 loses, a `Done` calendar entry is never replaced, and nothing is deleted for
