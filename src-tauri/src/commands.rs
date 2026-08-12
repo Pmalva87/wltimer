@@ -9,7 +9,7 @@ use wltimer_core::engine::{Cue, Engine, Snapshot};
 use wltimer_core::ids;
 use wltimer_core::model::{Phase, Workout};
 use wltimer_core::parser::{self, ParseError};
-use wltimer_core::plan::{self, Plan, PlanStore, PlanSummary};
+use wltimer_core::plan::{self, PatchCounts, Plan, PlanStore, PlanSummary};
 use wltimer_core::session::{RunOrigin, SavedSession, SessionStore};
 use wltimer_core::store::{Store, WorkoutSummary};
 
@@ -461,11 +461,10 @@ pub fn save_plan(
 #[derive(Serialize)]
 pub struct PlanImport {
     pub summary: PlanSummary,
-    /// Days of the stored plan this file replaced.
-    pub updated: usize,
-    /// Days it added — including a section carrying no id, which has nothing
-    /// to match on and so can only be new.
-    pub added: usize,
+    /// Days replaced, added and removed. A section carrying no id has nothing
+    /// to match on and so can only be an addition.
+    #[serde(flatten)]
+    pub counts: PatchCounts,
     /// Upcoming days the follow-up sync wrote to the calendar.
     pub synced: usize,
 }
@@ -483,9 +482,9 @@ pub fn import_plan(
     source: String,
     today: String,
 ) -> Result<PlanImport, Vec<ParseError>> {
-    let (summary, plan, updated, added) = state.plans.patch(&source, &now())?;
+    let (summary, plan, counts) = state.plans.patch(&source, &now())?;
     let synced = sync_upcoming(&state, &summary.slug, &plan, &date_or_local(&today));
-    Ok(PlanImport { summary, updated, added, synced })
+    Ok(PlanImport { summary, counts, synced })
 }
 
 /// Re-apply a stored plan's upcoming days to the calendar; returns how many

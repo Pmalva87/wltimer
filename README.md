@@ -100,8 +100,9 @@ What identity buys you:
   taken before plan ids existed is recognised by the day ids it still carries.
 - **A plan upload need not be the whole plan.** Uploading a file with only the
   days you fixed updates exactly those, matched by workout id, and leaves every
-  other day standing — days are never dropped for being absent. "Replace"
-  overwrites a plan with a file outright, and is the way to unschedule a day.
+  other day standing — days are never dropped for being absent. Removing a day
+  is asked for outright, with `- deleted: true` under its heading in the file
+  you upload; "Replace" still overwrites a whole plan with a file.
 - **A workout you have already finished is never replaced or duplicated by a
   sync.** The done entry stands; no planned copy appears beside it.
 - Copies get their own identity: scheduling a library template on a date,

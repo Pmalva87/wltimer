@@ -145,10 +145,14 @@ A plan has **two write paths, and which one a caller takes is a decision about
 deletion**. `PlanStore::patch` folds an uploaded file's `##` sections into the
 stored plan by workout id and never drops a day for being absent — that is what
 every upload goes through, so a file holding two corrected days is a fix rather
-than a new plan. `PlanStore::save` replaces the document outright, which is
-what unschedules a day; it is the "Replace" button and, for its own reasons
-above, bundle restore. Both route by identity: the plan's own `- id:`, falling
-back to a day-id overlap for files written from a copy that predates plan ids.
+than a new plan. Removal is asked for instead: a section carrying
+`- deleted: true` removes the day it names, which is why `parse_plan` exempts
+such a section from being a valid workout (it has no exercises) and why both
+write paths run `strip_deleted` — a stored plan never holds a marker, so no
+reader downstream has to know about them. `PlanStore::save` replaces the
+document outright; it is the "Replace" button and, for its own reasons above,
+bundle restore. Both route by identity: the plan's own `- id:`, falling back to
+a day-id overlap for files written from a copy that predates plan ids.
 
 ### Backup bundles (`core/src/bundle.rs`)
 

@@ -86,12 +86,19 @@ Rules:
     how the app recognises the day it already scheduled, so the calendar entry
     is updated or moved rather than duplicated.
   - Give a genuinely new day a new UUID.
+- \`- deleted: true\` — under a day's heading, in place of its exercises: a
+  request to **remove that day** from the plan. It needs the day's \`- id:\` to
+  say which day, and nothing else — no \`###\` sections, since there is no
+  workout left to describe. A marker naming a day the plan does not have is
+  ignored, and removing every day of a plan is refused (delete the plan
+  instead). Never write one into a plan you are authoring; it only makes sense
+  in a file uploaded to change a plan that already exists.
 - A file need not contain the whole plan. Uploading one holding only the days
   you changed updates exactly those and leaves every other day standing, which
-  is the normal way to fix a plan. Days are matched by id alone — a section
-  with no id can only be new, so it is added rather than replacing anything.
-  Dropping a day from a plan is done with "Replace", which overwrites the plan
-  with the file and unschedules whatever the file leaves out.
+  is the normal way to fix a plan: add days by writing new sections, change
+  them by editing theirs, remove them with \`- deleted: true\`. Days are matched
+  by id alone — a section with no id can only be new, so it is added rather
+  than replacing anything.
 - \`### Exercise Name\` — the exercises of that day. Inside each exercise,
   bullet lines set parameters (all optional except \`work\`):
   - \`intervals\`: whole number >= 1 — how many work intervals (default 1)
@@ -132,4 +139,22 @@ Brace hard, hit depth, drive up fast.
 - intervals: 3
 - work: 1:00
 - rest: 0:45
+
+Example of a fix — upload this to change only these two days of the plan
+above, dropping the squats and reworking the bench. Everything the file does
+not mention is left exactly as it is:
+
+# 5/3/1 — Cycle 1
+- id: 0f2c8b76-4d31-4a55-9e17-83c6b0a4f2de
+
+## 2026-07-30: Heavy Squats
+- id: 3c1f7a92-8e04-4b1d-90aa-2d7c65f0e1b3
+- deleted: true
+
+## 2026-08-01: Bench Day
+- id: b57e0d41-6a92-4f38-8c05-1e9b4a72dd60
+### Bench Press
+- intervals: 5
+- work: 1:00
+- rest: 1:00
 `;

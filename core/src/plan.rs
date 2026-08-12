@@ -17,6 +17,11 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlanDay {
+    /// `- deleted: true` under the day's heading: a request to remove this day
+    /// from the plan it is uploaded against, matched by id like any other
+    /// section. Only ever true in a file on its way in — a stored plan never
+    /// keeps one, so nothing downstream has to remember to skip it.
+    pub deleted: bool,
     pub date: String,
     pub name: String,
     /// Standalone workout markdown for this day.
@@ -35,7 +40,15 @@ pub struct Plan {
     pub days: Vec<PlanDay>,
 }
 
-#[derive(Serialize, Clone)]
+/// What an uploaded file did to the plan it was applied to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct PatchCounts {
+    pub updated: usize,
+    pub added: usize,
+    pub removed: usize,
+}
+
+#[derive(Debug, Serialize, Clone)]
 pub struct PlanSummary {
     pub slug: String,
     pub name: String,
@@ -129,16 +142,22 @@ pub fn parse_plan(source: &str) -> Result<Plan, Vec<ParseError>> {
     let mut days: Vec<PlanDay> = Vec::new();
     for b in builders {
         let workout_md = format!("# {}\n{}\n", b.name, b.lines.join("\n"));
+        // A section asking for its day to be removed carries no exercises, so
+        // it is not held to what a workout must contain — its id and its date
+        // are the whole of it.
+        let deleted = section_deleted(&workout_md);
         // Validate the day as a standalone workout, mapping error lines back
         // to their position in the plan file (line 1 is the synthetic title).
-        if let Err(day_errors) = parser::parse_workout(&workout_md) {
-            for e in day_errors {
-                let orig = if e.line <= 1 {
-                    b.heading_line
-                } else {
-                    *b.line_map.get(e.line - 2).unwrap_or(&b.heading_line)
-                };
-                errors.push(err(orig, format!("day {}: {}", b.date, e.message)));
+        if !deleted {
+            if let Err(day_errors) = parser::parse_workout(&workout_md) {
+                for e in day_errors {
+                    let orig = if e.line <= 1 {
+                        b.heading_line
+                    } else {
+                        *b.line_map.get(e.line - 2).unwrap_or(&b.heading_line)
+                    };
+                    errors.push(err(orig, format!("day {}: {}", b.date, e.message)));
+                }
             }
         }
         // A date may carry several days: the calendar holds a list per date,
@@ -152,7 +171,7 @@ pub fn parse_plan(source: &str) -> Result<Plan, Vec<ParseError>> {
         if id.is_some() && days.iter().any(|d: &PlanDay| d.id == id) {
             errors.push(err(b.heading_line, format!("duplicate day id on '{}'", b.date)));
         }
-        days.push(PlanDay { date: b.date, name: b.name, workout_md, id });
+        days.push(PlanDay { deleted, date: b.date, name: b.name, workout_md, id });
     }
     // Stable, so two days on one date keep the order they were written in —
     // which is the only thing that says which came first that day.
@@ -190,7 +209,14 @@ pub fn merge_into_calendar(
 ) -> (usize, BTreeSet<String>) {
     let mut dirty: BTreeSet<String> = BTreeSet::new();
     let mut synced = 0;
-    let plan_ids: HashSet<&str> = plan.days.iter().filter_map(|d| d.id.as_deref()).collect();
+    // A stored plan holds no removal markers, so this only matters when a
+    // caller merges straight from a file: a day on its way out owns nothing.
+    let plan_ids: HashSet<&str> = plan
+        .days
+        .iter()
+        .filter(|d| !d.deleted)
+        .filter_map(|d| d.id.as_deref())
+        .collect();
 
     fn locate(by_date: &BTreeMap<String, Vec<DayEntry>>, id: &str) -> Option<(String, usize)> {
         by_date.iter().find_map(|(date, entries)| {
@@ -201,7 +227,7 @@ pub fn merge_into_calendar(
         })
     }
 
-    for day in plan.days.iter().filter(|d| d.date.as_str() >= from) {
+    for day in plan.days.iter().filter(|d| !d.deleted && d.date.as_str() >= from) {
         match day.id.as_deref().and_then(|id| locate(by_date, id)) {
             Some((date, i)) => {
                 if by_date[&date][i].status == DayStatus::Done {
@@ -296,17 +322,38 @@ fn sections(source: &str) -> (String, Vec<String>) {
     (preamble, sections)
 }
 
-/// The workout id a day section declares: the first valid `- id:` bullet under
-/// its heading, before its first exercise.
-fn section_id(section: &str) -> Option<String> {
+/// The bullets a day section declares under its heading, before its first
+/// exercise. Works both on a raw `## YYYY-MM-DD` section and on the standalone
+/// workout document a day converts to — the two differ only in heading depth.
+fn section_bullets(section: &str) -> impl Iterator<Item = (String, &str)> {
     section
         .lines()
         .skip(1)
         .take_while(|l| !l.trim_start().starts_with('#'))
-        .find_map(|l| match ids::bullet(l) {
-            Some((k, v)) if k == "id" && ids::valid_uuid(v) => Some(v.to_string()),
-            _ => None,
-        })
+        .filter_map(ids::bullet)
+}
+
+/// The workout id a day section declares.
+fn section_id(section: &str) -> Option<String> {
+    section_bullets(section)
+        .find(|(k, v)| k == "id" && ids::valid_uuid(v))
+        .map(|(_, v)| v.to_string())
+}
+
+/// Whether a day section asks for its day to be removed from the plan.
+fn section_deleted(section: &str) -> bool {
+    section_bullets(section).any(|(k, v)| k == "deleted" && v.eq_ignore_ascii_case("true"))
+}
+
+/// Drop every removal-marked section, leaving the rest byte-for-byte.
+///
+/// Applied on the way to disk by both write paths, so "a stored plan holds no
+/// removal markers" is an invariant rather than something every reader has to
+/// remember. A marker whose day is not in the plan simply disappears with it.
+fn strip_deleted(source: &str) -> String {
+    let (preamble, days) = sections(source);
+    let kept: String = days.into_iter().filter(|d| !section_deleted(d)).collect();
+    format!("{preamble}{kept}")
 }
 
 /// Fold an uploaded plan file's days into the plan it belongs to, matching
@@ -323,27 +370,37 @@ fn section_id(section: &str) -> Option<String> {
 /// rather than a new plan. Dropping a day is therefore something you ask for,
 /// never a side effect of what a file happens to leave out.
 ///
-/// Returns the merged document, how many days it replaced, and how many it
-/// added.
-pub fn merge_days_into(stored: &str, patch: &str) -> (String, usize, usize) {
+/// A section carrying `- deleted: true` removes the day it names instead of
+/// replacing it, so a file can add, fix and drop days in one upload. A marker
+/// matching nothing is a no-op: it is never added as a new day, which is the
+/// one case where appending an unmatched section would be actively wrong.
+///
+/// Returns the merged document and how many days it replaced, added and
+/// removed.
+pub fn merge_days_into(stored: &str, patch: &str) -> (String, usize, usize, usize) {
     let (_, mut days) = sections(stored);
     let (preamble, incoming) = sections(patch);
-    let (mut updated, mut added) = (0, 0);
+    let (mut updated, mut added, mut removed) = (0, 0, 0);
     for section in incoming {
         let at = section_id(&section)
             .and_then(|id| days.iter().position(|d| section_id(d).as_deref() == Some(&id)));
-        match at {
-            Some(i) => {
+        match (at, section_deleted(&section)) {
+            (Some(i), true) => {
+                days.remove(i);
+                removed += 1;
+            }
+            (None, true) => {}
+            (Some(i), false) => {
                 days[i] = section;
                 updated += 1;
             }
-            None => {
+            (None, false) => {
                 days.push(section);
                 added += 1;
             }
         }
     }
-    (format!("{preamble}{}", days.concat()), updated, added)
+    (format!("{preamble}{}", days.concat()), updated, added, removed)
 }
 
 /// Give every day section an id, leaving existing ones and every other byte
@@ -511,7 +568,10 @@ impl PlanStore {
         // re-parse with ids in place so the returned Plan carries the same ids
         // that were written to disk — sync matches on them.
         parse_plan(source)?;
-        let source = ensure_day_ids(source);
+        // Validated as the user wrote it, then stored without its removal
+        // markers: a marker is an instruction, not part of the plan.
+        let source = strip_deleted(source);
+        let source = ensure_day_ids(&source);
         let had_id = ids::extract_id(&source).is_some();
         let (source, id) = ids::ensure_id(&source);
         let plan = parse_plan(&source)?;
@@ -589,12 +649,12 @@ impl PlanStore {
     /// A file belonging to no stored plan is simply saved as a new one, so
     /// uploading a brand-new plan still works the way it always did.
     ///
-    /// Returns the days replaced and the days added alongside the summary.
+    /// Returns the days replaced, added and removed alongside the summary.
     pub fn patch(
         &self,
         source: &str,
         now: &str,
-    ) -> Result<(PlanSummary, Plan, usize, usize), Vec<ParseError>> {
+    ) -> Result<(PlanSummary, Plan, PatchCounts), Vec<ParseError>> {
         let uploaded = parse_plan(source)?;
         let owner = ids::extract_id(source)
             .and_then(|id| self.find_by_id(&id))
@@ -603,10 +663,18 @@ impl PlanStore {
         let (Some(slug), Some(stored)) = (owner, stored) else {
             let (summary, plan) = self.save(source, None, now)?;
             let added = plan.days.len();
-            return Ok((summary, plan, 0, added));
+            return Ok((summary, plan, PatchCounts { updated: 0, added, removed: 0 }));
         };
 
-        let (merged, updated, added) = merge_days_into(&stored, source);
+        let (merged, updated, added, removed) = merge_days_into(&stored, source);
+        if sections(&merged).1.is_empty() {
+            // `parse_plan` would say "no days", which reads as a problem with
+            // the file rather than with what it asks for.
+            return Err(vec![err(
+                1,
+                "that would remove every day of the plan — delete the plan instead",
+            )]);
+        }
         // The merged document keeps the stored plan's identity even when the
         // uploaded file has none of its own.
         let merged = match ids::extract_id(&stored) {
@@ -617,7 +685,7 @@ impl PlanStore {
         // lines then point into the merged document rather than the uploaded
         // file, but such a collision can only come from the upload's own ids.
         let (summary, plan) = self.save(&merged, Some(&slug), now)?;
-        Ok((summary, plan, updated, added))
+        Ok((summary, plan, PatchCounts { updated, added, removed }))
     }
 
     pub fn delete(&self, slug: &str) -> Result<(), String> {
@@ -794,10 +862,10 @@ Brace hard.
         let fix = format!(
             "# 531 Cycle 1\n\n## 2026-08-01: Bench Day\n- id: {second}\n### Bench Press\n- intervals: 5\n- work: 1:30\n"
         );
-        let (again, merged, updated, added) = s.patch(&fix, LATER).unwrap();
+        let (again, merged, counts) = s.patch(&fix, LATER).unwrap();
 
         assert_eq!(again.slug, sum.slug, "the same plan, not a second one");
-        assert_eq!((updated, added), (1, 0));
+        assert_eq!((counts.updated, counts.added, counts.removed), (1, 0, 0));
         assert_eq!(merged.days.len(), 2, "the untouched day is still there");
         assert_eq!(merged.days[0].name, "Heavy Squats");
         assert!(merged.days[0].workout_md.contains("Brace hard."));
@@ -815,9 +883,9 @@ Brace hard.
 
         let fix =
             format!("# 531 Cycle 1\n\n## 2026-08-05: Heavy Squats\n- id: {first}\n### Back Squat\n- work: 2:00\n");
-        let (_, merged, updated, added) = s.patch(&fix, LATER).unwrap();
+        let (_, merged, counts) = s.patch(&fix, LATER).unwrap();
 
-        assert_eq!((updated, added), (1, 0));
+        assert_eq!((counts.updated, counts.added, counts.removed), (1, 0, 0));
         assert_eq!(merged.days.len(), 2);
         assert!(!merged.days.iter().any(|d| d.date == "2026-07-30"));
         assert_eq!(merged.days.iter().filter(|d| d.id.as_deref() == Some(&first)).count(), 1);
@@ -836,9 +904,9 @@ Brace hard.
         let fix = format!(
             "# 531 Cycle 1\n- id: {plan_id}\n\n## 2026-08-01: Evening Cardio\n### Row\n- work: 5:00\n"
         );
-        let (_, merged, updated, added) = s.patch(&fix, LATER).unwrap();
+        let (_, merged, counts) = s.patch(&fix, LATER).unwrap();
 
-        assert_eq!((updated, added), (0, 1));
+        assert_eq!((counts.updated, counts.added, counts.removed), (0, 1, 0));
         assert_eq!(merged.days.len(), 3);
         let cardio = merged.days.iter().find(|d| d.name == "Evening Cardio").unwrap();
         assert_eq!(cardio.date, "2026-08-01");
@@ -847,11 +915,77 @@ Brace hard.
     }
 
     #[test]
+    fn a_marked_day_is_removed_from_the_plan() {
+        let s = plan_store("patch-delete");
+        let (sum, plan) = s.save(PLAN, None, NOW).unwrap();
+        let doomed = plan.days[0].id.clone().unwrap();
+        let plan_id = ids::extract_id(&s.read_source(&sum.slug).unwrap()).unwrap();
+
+        let fix = format!(
+            "# 531 Cycle 1\n- id: {plan_id}\n\n## 2026-07-30: Heavy Squats\n- id: {doomed}\n- deleted: true\n"
+        );
+        let (again, merged, counts) = s.patch(&fix, LATER).unwrap();
+
+        assert_eq!(again.slug, sum.slug);
+        assert_eq!((counts.updated, counts.added, counts.removed), (0, 0, 1));
+        assert_eq!(merged.days.len(), 1);
+        assert_eq!(merged.days[0].name, "Bench Day");
+        // The marker is an instruction, not a day: it must not be left behind.
+        let stored = s.read_source(&sum.slug).unwrap();
+        assert!(!stored.contains("deleted"), "{stored}");
+        assert!(!stored.contains(&doomed), "{stored}");
+    }
+
+    #[test]
+    fn a_marker_for_a_day_the_plan_does_not_have_changes_nothing() {
+        let s = plan_store("patch-delete-unknown");
+        let (sum, _) = s.save(PLAN, None, NOW).unwrap();
+        let plan_id = ids::extract_id(&s.read_source(&sum.slug).unwrap()).unwrap();
+        let stranger = ids::new_id();
+
+        let fix = format!(
+            "# 531 Cycle 1\n- id: {plan_id}\n\n## 2026-07-30: Whatever\n- id: {stranger}\n- deleted: true\n"
+        );
+        let (_, merged, counts) = s.patch(&fix, LATER).unwrap();
+
+        assert_eq!((counts.updated, counts.added, counts.removed), (0, 0, 0));
+        // Above all it must not be *added* — a removal that misses is a no-op.
+        assert_eq!(merged.days.len(), 2);
+    }
+
+    #[test]
+    fn removing_the_last_day_is_refused_rather_than_leaving_an_empty_plan() {
+        let s = plan_store("patch-delete-all");
+        let one = "# Solo\n\n## 2026-07-30: Only\n### X\n- work: 30\n";
+        let (sum, plan) = s.save(one, None, NOW).unwrap();
+        let only = plan.days[0].id.clone().unwrap();
+        let plan_id = ids::extract_id(&s.read_source(&sum.slug).unwrap()).unwrap();
+
+        let fix = format!(
+            "# Solo\n- id: {plan_id}\n\n## 2026-07-30: Only\n- id: {only}\n- deleted: true\n"
+        );
+        let errs = s.patch(&fix, LATER).unwrap_err();
+        assert!(errs[0].message.contains("delete the plan instead"), "{errs:?}");
+        // And the plan is still standing.
+        assert_eq!(s.list().len(), 1);
+    }
+
+    #[test]
+    fn a_marked_day_is_never_scheduled_when_a_file_is_merged_straight_in() {
+        let src = "# P\n\n## 2026-07-30: Gone\n- id: 11111111-1111-1111-1111-111111111111\n- deleted: true\n\n## 2026-08-01: Kept\n- id: 22222222-2222-2222-2222-222222222222\n### Y\n- work: 30\n";
+        let plan = parse_plan(src).unwrap();
+        let mut cal = BTreeMap::new();
+        merge_into_calendar(&plan, "p", "2026-07-01", NOW, &mut cal);
+        assert!(!cal.contains_key("2026-07-30"));
+        assert_eq!(cal["2026-08-01"].len(), 1);
+    }
+
+    #[test]
     fn an_upload_belonging_to_no_stored_plan_is_still_a_new_plan() {
         let s = plan_store("patch-new");
-        let (summary, plan, updated, added) = s.patch(PLAN, NOW).unwrap();
+        let (summary, plan, counts) = s.patch(PLAN, NOW).unwrap();
         assert_eq!(summary.slug, "531-cycle-1");
-        assert_eq!((updated, added), (0, 2));
+        assert_eq!((counts.updated, counts.added, counts.removed), (0, 2, 0));
         assert_eq!(plan.days.len(), 2);
     }
 

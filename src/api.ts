@@ -115,6 +115,7 @@ export interface PlanImport {
   summary: PlanSummary;
   updated: number;
   added: number;
+  removed: number;
   synced: number;
 }
 

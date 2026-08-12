@@ -188,6 +188,7 @@ export async function renderLibrary(root: HTMLElement) {
     const parts: string[] = [];
     if (r.updated) parts.push(`${r.updated} day${r.updated === 1 ? "" : "s"} updated`);
     if (r.added) parts.push(`${r.added} added`);
+    if (r.removed) parts.push(`${r.removed} removed`);
     if (parts.length === 0) parts.push("nothing to change");
     const synced = r.synced ? `, ${r.synced} synced to the calendar` : "";
     return `✓ "${r.summary.name}" — ${parts.join(", ")}${synced}`;
