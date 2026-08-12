@@ -136,9 +136,11 @@ export async function renderCalendar(root: HTMLElement, dateArg: string | null) 
             showLibraryPicker
               ? `<div class="lib-picker" id="libpicker"><div class="empty small">loading…</div></div>`
               : `<div class="day-add">
-                   <button class="btn" id="upload">📂 Upload .md</button>
-                   <button class="btn" id="fromlib">📚 From library</button>
-                   <a class="btn" href="#/edit/@${selected}">＋ Build</a>
+                   <button class="btn primary" id="fromlib">📚 Add from library</button>
+                   <div class="day-add-row">
+                     <a class="btn" href="#/edit/@${selected}">＋ Build</a>
+                     <button class="btn" id="upload">📂 Upload .md</button>
+                   </div>
                  </div>`
           }
         </div>
@@ -260,21 +262,38 @@ export async function renderCalendar(root: HTMLElement, dateArg: string | null) 
       showLibraryPicker = true;
       await render();
       const picker = root.querySelector<HTMLElement>("#libpicker")!;
-      const workouts = (await api.listWorkouts()).filter((w) => !w.error);
+      const all = await api.listWorkouts();
+      const workouts = all.filter((w) => !w.error);
+      // A workout that no longer parses cannot be scheduled, but saying so
+      // beats an empty picker that looks like the library itself is gone.
+      const broken = all.length - workouts.length;
       picker.innerHTML =
-        workouts.length === 0
-          ? `<div class="empty small">library is empty</div><button class="btn" id="pickcancel">Cancel</button>`
+        `<div class="lib-picker-head">Add to ${selLabel}</div>` +
+        (workouts.length === 0
+          ? `<div class="empty small">library is empty</div>`
           : workouts
               .map(
                 (w) =>
                   `<button class="btn pick" data-slug="${esc(w.slug)}">${esc(w.name)}</button>`,
               )
-              .join("") + `<button class="btn" id="pickcancel">Cancel</button>`;
+              .join("")) +
+        (broken > 0
+          ? `<div class="empty small">${broken} workout${broken === 1 ? " does" : "s do"} not parse and cannot be scheduled</div>`
+          : "") +
+        `<button class="btn" id="pickcancel">Cancel</button>`;
       picker.querySelectorAll<HTMLButtonElement>("button.pick").forEach((b) => {
         b.addEventListener("click", async () => {
+          const name = b.textContent ?? "";
           showLibraryPicker = false;
-          await api.addDayFromLibrary(selected, b.dataset.slug!);
-          void render();
+          try {
+            await api.addDayFromLibrary(selected, b.dataset.slug!);
+            await render();
+            showStatus(`✓ added "${name}" to ${selLabel}`, true);
+          } catch (e) {
+            // Without this the picker just vanished and nothing appeared.
+            await render();
+            showStatus(String(e), false);
+          }
         });
       });
       picker.querySelector("#pickcancel")?.addEventListener("click", () => {

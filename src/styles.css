@@ -490,12 +490,21 @@ details.notes textarea {
   flex: 1;
 }
 
+/* Scheduling a workout already in the library is the common way to fill a
+   day, so it gets a row of its own — three across squeezed the labels into
+   wrapped stubs nobody read. */
 .day-add {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.day-add-row {
   display: flex;
   gap: 0.5rem;
 }
 
-.day-add .btn {
+.day-add-row .btn {
   flex: 1;
 }
 
@@ -503,6 +512,11 @@ details.notes textarea {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+.lib-picker-head {
+  color: var(--muted);
+  font-size: 0.9rem;
 }
 
 .empty.small {
