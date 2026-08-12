@@ -141,17 +141,21 @@ pub fn parse_plan(source: &str) -> Result<Plan, Vec<ParseError>> {
                 errors.push(err(orig, format!("day {}: {}", b.date, e.message)));
             }
         }
-        if days.iter().any(|d: &PlanDay| d.date == b.date) {
-            errors.push(err(b.heading_line, format!("duplicate day '{}'", b.date)));
-        }
-        // Two days sharing an id would make sync ambiguous about which entry
-        // each one owns, so it is as much an error as a duplicate date.
+        // A date may carry several days: the calendar holds a list per date,
+        // and a plan that could not say "squats and then cardio on Tuesday"
+        // could not describe what was actually done. Identity, not the date,
+        // is what a sync matches on.
+        //
+        // Two days sharing an id, though, would make sync ambiguous about
+        // which entry each one owns, so that stays an error.
         let id = ids::extract_id(&workout_md);
         if id.is_some() && days.iter().any(|d: &PlanDay| d.id == id) {
             errors.push(err(b.heading_line, format!("duplicate day id on '{}'", b.date)));
         }
         days.push(PlanDay { date: b.date, name: b.name, workout_md, id });
     }
+    // Stable, so two days on one date keep the order they were written in —
+    // which is the only thing that says which came first that day.
     days.sort_by(|a, b| a.date.cmp(&b.date));
 
     if errors.is_empty() {
@@ -186,6 +190,7 @@ pub fn merge_into_calendar(
 ) -> (usize, BTreeSet<String>) {
     let mut dirty: BTreeSet<String> = BTreeSet::new();
     let mut synced = 0;
+    let plan_ids: HashSet<&str> = plan.days.iter().filter_map(|d| d.id.as_deref()).collect();
 
     fn locate(by_date: &BTreeMap<String, Vec<DayEntry>>, id: &str) -> Option<(String, usize)> {
         by_date.iter().find_map(|(date, entries)| {
@@ -216,14 +221,23 @@ pub fn merge_into_calendar(
             }
             None => {
                 // Nothing carries this day's id. Before adding, check whether
-                // this plan already has a completed entry on the date: entries
-                // scheduled before day ids existed cannot be matched by id, and
+                // this plan already has a completed entry on the date that no
+                // *other* day of the plan accounts for: entries scheduled
+                // before day ids existed cannot be matched by id, and
                 // duplicating a workout already done is the exact failure this
                 // function exists to prevent.
+                //
+                // The "no other day accounts for it" part is what lets a date
+                // hold two workouts. A done entry another plan day owns by id
+                // is that day's record, and says nothing about this one — so
+                // it must not block adding a second workout to a date already
+                // trained.
                 let already_done = by_date.get(&day.date).is_some_and(|entries| {
-                    entries
-                        .iter()
-                        .any(|e| e.status == DayStatus::Done && e.source_plan.as_deref() == Some(slug))
+                    entries.iter().any(|e| {
+                        e.status == DayStatus::Done
+                            && e.source_plan.as_deref() == Some(slug)
+                            && !days::entry_id(e).is_some_and(|id| plan_ids.contains(id.as_str()))
+                    })
                 });
                 if already_done {
                     continue;
@@ -242,7 +256,6 @@ pub fn merge_into_calendar(
     }
 
     // Days dropped from the plan leave their still-planned entries behind.
-    let plan_ids: HashSet<&str> = plan.days.iter().filter_map(|d| d.id.as_deref()).collect();
     for (date, entries) in by_date.iter_mut() {
         let before = entries.len();
         entries.retain(|e| {
@@ -296,9 +309,9 @@ impl PlanStore {
         Ok(store)
     }
 
-    /// One-time migration for plans saved before day ids, or before `updated`,
-    /// existed. Both in one pass over the directory: the mtime a plan inherits
-    /// has to be read before this function's own rewrite replaces it.
+    /// One-time migration for plans saved before day ids, a plan id, or
+    /// `updated` existed. All in one pass over the directory: the mtime a plan
+    /// inherits has to be read before this function's own rewrite replaces it.
     fn backfill_day_ids_and_updated(&self) {
         let Ok(entries) = fs::read_dir(&self.dir) else {
             return;
@@ -313,7 +326,7 @@ impl PlanStore {
                 .and_then(|m| m.modified())
                 .ok()
                 .and_then(crate::time::from_system_time);
-            let mut updated = ensure_day_ids(&source);
+            let mut updated = ids::ensure_id(&ensure_day_ids(&source)).0;
             if ids::extract_updated(&updated).is_none() {
                 if let Some(mtime) = mtime {
                     updated = ids::set_updated(&updated, &mtime);
@@ -329,20 +342,61 @@ impl PlanStore {
         self.dir.join(format!("{slug}.md.zst"))
     }
 
-    pub fn list(&self) -> Vec<PlanSummary> {
-        let mut out = Vec::new();
+    /// Every stored plan as `(slug, source)`. Shared by `list` and the two
+    /// lookups below so they cannot disagree about what counts as stored.
+    fn stored(&self) -> Vec<(String, String)> {
         let Ok(entries) = fs::read_dir(&self.dir) else {
-            return out;
+            return Vec::new();
         };
+        let mut out = Vec::new();
         for entry in entries.flatten() {
             let path = entry.path();
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
             let Some(slug) = name.strip_suffix(".md.zst") else {
                 continue;
             };
-            let Ok(source) = zio::read_text(&path) else {
-                continue;
-            };
+            if let Ok(source) = zio::read_text(&path) {
+                out.push((slug.to_string(), source));
+            }
+        }
+        out.sort();
+        out
+    }
+
+    /// Slug of the stored plan carrying this id, if any.
+    fn find_by_id(&self, id: &str) -> Option<String> {
+        self.stored()
+            .into_iter()
+            .find(|(_, source)| ids::extract_id(source).as_deref() == Some(id))
+            .map(|(slug, _)| slug)
+    }
+
+    /// Slug of the stored plan that shares a day with `days`.
+    ///
+    /// A plan file written before plans themselves had ids still carries a uuid
+    /// per day, and those are preserved across revisions — so an overlap is
+    /// proof this upload is a new version of that plan rather than a new one.
+    /// Without this, the copy on your laptop keeps landing as "My Plan (2)"
+    /// until you have exported the app's own copy at least once.
+    fn find_by_day_ids(&self, days: &[PlanDay]) -> Option<String> {
+        let ids: HashSet<&str> = days.iter().filter_map(|d| d.id.as_deref()).collect();
+        if ids.is_empty() {
+            return None;
+        }
+        self.stored().into_iter().find_map(|(slug, source)| {
+            let stored = parse_plan(&source).ok()?;
+            stored
+                .days
+                .iter()
+                .any(|d| d.id.as_deref().is_some_and(|id| ids.contains(id)))
+                .then_some(slug)
+        })
+    }
+
+    pub fn list(&self) -> Vec<PlanSummary> {
+        let mut out = Vec::new();
+        for (slug, source) in self.stored() {
+            let slug = slug.as_str();
             out.push(match parse_plan(&source) {
                 Ok(p) => PlanSummary {
                     slug: slug.to_string(),
@@ -383,8 +437,42 @@ impl PlanStore {
         // that were written to disk — sync matches on them.
         parse_plan(source)?;
         let source = ensure_day_ids(source);
+        let had_id = ids::extract_id(&source).is_some();
+        let (source, id) = ids::ensure_id(&source);
+        let plan = parse_plan(&source)?;
+
+        // Which stored plan is this a new version of? Its own id, when it
+        // carries one. A file carrying none can still be a revision written
+        // from a copy taken before plans had ids — its day ids give it away,
+        // since those are preserved across revisions — and adopting the stored
+        // plan's id keeps identity stable from then on. Without this the copy
+        // on your laptop lands as "My Plan (2)" every single time.
+        let (source, owner) = match self.find_by_id(&id) {
+            Some(slug) => (source, Some(slug)),
+            None if had_id => (source, None),
+            None => match self.find_by_day_ids(&plan.days) {
+                Some(slug) => {
+                    let stored_id = self.read_source(&slug).ok().and_then(|s| ids::extract_id(&s));
+                    let source = match stored_id {
+                        Some(stored_id) => ids::set_id(&source, &stored_id),
+                        None => source,
+                    };
+                    (source, Some(slug))
+                }
+                None => (source, None),
+            },
+        };
+
+        // Two files must never claim one identity: a document carrying another
+        // stored plan's id is a copy of it, so it gets its own — the same rule
+        // `store::save` applies to workouts.
+        let source = match (prev_slug, owner.as_deref()) {
+            (Some(prev), Some(other)) if other != prev => ids::with_new_id(&source).0,
+            _ => source,
+        };
+        let prev_slug = prev_slug.or(owner.as_deref());
+
         let source = source.as_str();
-        let plan = parse_plan(source)?;
         let mut name = plan.name.clone();
         let mut slug = slugify(&name);
         if prev_slug != Some(slug.as_str()) {
@@ -477,10 +565,12 @@ Brace hard.
     }
 
     #[test]
-    fn rejects_duplicate_dates() {
+    fn a_date_may_hold_several_workouts_in_the_order_written() {
         let src = "# P\n\n## 2026-07-30: A\n### X\n- work: 30\n\n## 2026-07-30: B\n### Y\n- work: 30\n";
-        let errs = parse_plan(src).unwrap_err();
-        assert!(errs.iter().any(|e| e.message.contains("duplicate day")));
+        let p = parse_plan(src).unwrap();
+        assert_eq!(p.days.len(), 2);
+        assert_eq!(p.days[0].name, "A");
+        assert_eq!(p.days[1].name, "B");
     }
 
     #[test]
@@ -514,6 +604,23 @@ Brace hard.
     }
 
     // ---- day ids and calendar merge ----
+
+    /// The same file as it would have looked before plans had ids: the
+    /// preamble `- id:` gone, every day id left in place.
+    fn drop_plan_id(source: &str) -> String {
+        let mut out = String::new();
+        let mut preamble = true;
+        for line in source.split_inclusive('\n') {
+            if line.trim_start().starts_with("## ") {
+                preamble = false;
+            }
+            if preamble && matches!(ids::bullet(line), Some((k, _)) if k == "id") {
+                continue;
+            }
+            out.push_str(line);
+        }
+        out
+    }
 
     fn plan_store(tag: &str) -> PlanStore {
         let dir = std::env::temp_dir().join(format!("wltimer-plans-{tag}-{}", std::process::id()));
@@ -560,6 +667,90 @@ Brace hard.
             first.days.iter().map(|d| d.id.clone()).collect::<Vec<_>>(),
             again.days.iter().map(|d| d.id.clone()).collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn merge_schedules_both_workouts_of_a_doubled_date() {
+        let two = "# P\n\n## 2026-07-30: Squats\n### X\n- work: 30\n\n## 2026-07-30: Cardio\n### Y\n- work: 30\n";
+        let s = plan_store("doubled");
+        let (_, plan) = s.save(two, None, NOW).unwrap();
+        let cal = calendar(&plan, "p");
+        assert_eq!(cal["2026-07-30"].len(), 2);
+        assert_eq!(days::entry_name(&cal["2026-07-30"][0]), "Squats");
+        assert_eq!(days::entry_name(&cal["2026-07-30"][1]), "Cardio");
+    }
+
+    #[test]
+    fn a_second_workout_can_be_added_to_a_date_already_trained() {
+        // The first workout of the day is done; adding another one to the plan
+        // must schedule it rather than read as "that day is finished".
+        let one = "# P\n\n## 2026-07-30: Squats\n### X\n- work: 30\n";
+        let s = plan_store("second");
+        let (sum, plan) = s.save(one, None, NOW).unwrap();
+        let mut cal = calendar(&plan, &sum.slug);
+        let entry = &mut cal.get_mut("2026-07-30").unwrap()[0];
+        entry.status = DayStatus::Done;
+        entry.completed_at = Some("2026-07-30T18:00:00Z".into());
+
+        let stored = s.read_source(&sum.slug).unwrap();
+        let two = format!("{stored}\n## 2026-07-30: Cardio\n### Y\n- work: 30\n");
+        let (_, plan) = s.save(&two, Some(&sum.slug), NOW).unwrap();
+        merge_into_calendar(&plan, &sum.slug, "2026-07-01", NOW, &mut cal);
+
+        let day = &cal["2026-07-30"];
+        assert_eq!(day.len(), 2, "the done squats plus the new cardio");
+        assert_eq!(day[0].status, DayStatus::Done);
+        assert_eq!(days::entry_name(&day[1]), "Cardio");
+    }
+
+    #[test]
+    fn re_uploading_an_edited_plan_updates_it_in_place() {
+        // The whole point: a fix to a plan you already have must not land
+        // beside it as "531 Cycle 1 (2)".
+        let s = plan_store("reupload");
+        let first = s.save(PLAN, None, NOW).unwrap().0;
+        let exported = s.read_source(&first.slug).unwrap();
+        let edited = exported.replace("Brace hard.", "Brace harder.");
+
+        // Uploaded as a plain upload — no `prev_slug`, the way the file picker
+        // calls it. The id in the file is what routes it home.
+        let again = s.save(&edited, None, NOW).unwrap().0;
+        assert_eq!(again.slug, first.slug);
+        assert_eq!(s.list().len(), 1);
+        assert!(s.read_source(&first.slug).unwrap().contains("Brace harder."));
+    }
+
+    #[test]
+    fn a_plan_revised_from_a_copy_without_a_plan_id_is_matched_by_its_days() {
+        // The realistic case: the .md on your laptop predates plan ids, so it
+        // carries day ids only. Those still identify the plan it came from.
+        let s = plan_store("bydays");
+        let first = s.save(PLAN, None, NOW).unwrap().0;
+        let stored = s.read_source(&first.slug).unwrap();
+        let plan_id = ids::extract_id(&stored).expect("plan gets an id on save");
+        let without_plan_id = drop_plan_id(&stored);
+        assert!(ids::extract_id(&without_plan_id).is_none());
+
+        let again = s.save(&without_plan_id, None, NOW).unwrap().0;
+        assert_eq!(again.slug, first.slug);
+        assert_eq!(s.list().len(), 1);
+        // It adopts the stored plan's id rather than minting one, so the next
+        // upload from any copy still lands here.
+        assert_eq!(
+            ids::extract_id(&s.read_source(&first.slug).unwrap()).as_deref(),
+            Some(plan_id.as_str())
+        );
+    }
+
+    #[test]
+    fn an_unrelated_plan_still_gets_its_own_file() {
+        let s = plan_store("unrelated");
+        s.save(PLAN, None, NOW).unwrap();
+        let other = "# 531 Cycle 1\n\n## 2026-09-01: Deadlifts\n### Deadlift\n- work: 60\n";
+        let saved = s.save(other, None, NOW).unwrap().0;
+        // Same title, no shared days: a different plan, counter and all.
+        assert_eq!(saved.name, "531 Cycle 1 (2)");
+        assert_eq!(s.list().len(), 2);
     }
 
     #[test]

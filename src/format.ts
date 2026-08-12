@@ -59,19 +59,25 @@ Brace hard, hit depth, drive up fast.
 export const PLAN_FORMAT_GUIDE = `# wltimer training-plan format
 
 Write a multi-day training plan as a single markdown document in exactly this
-format. The app imports such files directly ("Upload plan") and schedules one
-workout per dated day on its calendar.
+format. The app imports such files directly ("Upload plan") and schedules each
+dated section as a workout on its calendar.
 
 Rules:
 
 - \`# Plan Name\` — exactly one, first heading in the file. Required.
+- \`- id: <uuid>\` — app-managed; leave it alone. Sits under the plan title and
+  identifies the plan file itself, which is how re-uploading a corrected plan
+  updates the existing one instead of creating a second copy. Omit it when
+  writing a new plan by hand; **keep it exactly as it is** when revising a plan
+  exported from the app.
 - \`- updated: <timestamp>\` — app-managed; leave it alone. Sits under the plan
   title, records when the plan file last changed as UTC RFC 3339
   (\`2026-08-09T13:45:31Z\`), and is rewritten on every save. Omit it when
   writing a new plan by hand.
-- \`## YYYY-MM-DD: Day Name\` — one section per training day. The date is
-  required, must be unique within the plan, and days need not be consecutive
-  (skipped dates are rest days).
+- \`## YYYY-MM-DD: Day Name\` — one section per workout. The date is required
+  and days need not be consecutive (skipped dates are rest days). A date **may
+  repeat**: two sections on one date schedule two workouts that day, in the
+  order written.
 - \`- id: <uuid>\` — directly under each day's heading, before its first
   \`###\`. A random UUID, different for every day in the plan.
   - Writing a **new** plan: generate a fresh UUID per day.

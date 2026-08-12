@@ -92,7 +92,12 @@ What identity buys you:
   new workout, so hand-written `.md` uploads still work as before.
 - Plan days carry one id each, inherited by the calendar entry they schedule.
   Re-syncing a plan matches on that id, so it updates its days rather than
-  duplicating them — even if you re-upload the plan file as a new plan.
+  duplicating them — even if you re-upload the plan file as a new plan. Because
+  identity does the matching, a date may hold **several** days: a plan can say
+  squats and then cardio on the same Tuesday, as the calendar always could.
+- The plan file itself carries an id too, so **re-uploading a corrected plan
+  updates it** instead of adding "531 Cycle 1 (2)". A file written from a copy
+  taken before plan ids existed is recognised by the day ids it still carries.
 - **A workout you have already finished is never replaced or duplicated by a
   sync.** The done entry stands; no planned copy appears beside it.
 - Copies get their own identity: scheduling a library template on a date,
