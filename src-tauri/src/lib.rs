@@ -48,6 +48,7 @@ pub fn run() {
             commands::list_plans,
             commands::get_plan_source,
             commands::save_plan,
+            commands::import_plan,
             commands::sync_plan,
             commands::delete_plan,
             commands::export_bundle,

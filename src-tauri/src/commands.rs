@@ -457,6 +457,37 @@ pub fn save_plan(
     Ok(summary)
 }
 
+/// What an uploaded plan file did to the plan it belongs to.
+#[derive(Serialize)]
+pub struct PlanImport {
+    pub summary: PlanSummary,
+    /// Days of the stored plan this file replaced.
+    pub updated: usize,
+    /// Days it added — including a section carrying no id, which has nothing
+    /// to match on and so can only be new.
+    pub added: usize,
+    /// Upcoming days the follow-up sync wrote to the calendar.
+    pub synced: usize,
+}
+
+/// Apply an uploaded plan file to the plan it belongs to, updating only the
+/// days it carries, and sync what changed.
+///
+/// This is what every plan upload goes through: a file holding the two days
+/// you fixed fixes those two, rather than becoming the whole plan and
+/// unscheduling everything it left out. Replacing a plan outright is the
+/// explicit `save_plan` path behind "Replace".
+#[tauri::command]
+pub fn import_plan(
+    state: State<AppState>,
+    source: String,
+    today: String,
+) -> Result<PlanImport, Vec<ParseError>> {
+    let (summary, plan, updated, added) = state.plans.patch(&source, &now())?;
+    let synced = sync_upcoming(&state, &summary.slug, &plan, &date_or_local(&today));
+    Ok(PlanImport { summary, updated, added, synced })
+}
+
 /// Re-apply a stored plan's upcoming days to the calendar; returns how many
 /// days were scheduled.
 #[tauri::command]

@@ -242,7 +242,7 @@ export async function renderCalendar(root: HTMLElement, dateArg: string | null) 
       if (planCheck.status === "ok") {
         // Plans carry their own dates; import as a plan instead of pinning
         // the whole thing to one day.
-        await api.savePlan(text, null).catch(() => undefined);
+        await api.importPlan(text).catch(() => undefined);
         location.hash = "#/library";
         return;
       }

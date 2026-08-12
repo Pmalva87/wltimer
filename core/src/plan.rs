@@ -271,6 +271,81 @@ pub fn merge_into_calendar(
     (synced, dirty)
 }
 
+/// Split a plan document into its preamble — the title and its bullets — and
+/// one string per `## ` day section, in file order. Slices the user's own bytes
+/// rather than re-serialising, for the same reason [`ensure_day_ids`] is
+/// surgical: a plan is stored as written and there is no `plan_to_markdown` to
+/// round-trip through.
+fn sections(source: &str) -> (String, Vec<String>) {
+    let mut preamble = String::new();
+    let mut sections: Vec<String> = Vec::new();
+    for line in source.split_inclusive('\n') {
+        let trimmed = line.trim();
+        // A day heading, not an exercise heading (`### ` fails this prefix).
+        let starts_day = trimmed
+            .strip_prefix("## ")
+            .is_some_and(|h| parse_day_heading(h).is_some());
+        if starts_day {
+            sections.push(String::new());
+        }
+        match sections.last_mut() {
+            Some(section) => section.push_str(line),
+            None => preamble.push_str(line),
+        }
+    }
+    (preamble, sections)
+}
+
+/// The workout id a day section declares: the first valid `- id:` bullet under
+/// its heading, before its first exercise.
+fn section_id(section: &str) -> Option<String> {
+    section
+        .lines()
+        .skip(1)
+        .take_while(|l| !l.trim_start().starts_with('#'))
+        .find_map(|l| match ids::bullet(l) {
+            Some((k, v)) if k == "id" && ids::valid_uuid(v) => Some(v.to_string()),
+            _ => None,
+        })
+}
+
+/// Fold an uploaded plan file's days into the plan it belongs to, matching
+/// **by workout id** — the same uuid the calendar entry carries.
+///
+/// A section whose id is already in the plan replaces that day wherever it
+/// sits, date included, so a fix that also re-dates a day moves it instead of
+/// adding a second copy. A section with no match is appended: with no id there
+/// is nothing to match on, and guessing by date is exactly the fallback that
+/// makes a re-dated fix duplicate itself.
+///
+/// Days the file does not mention are left untouched — the rule
+/// `bundle::restore` follows, and what makes uploading a two-day fix a fix
+/// rather than a new plan. Dropping a day is therefore something you ask for,
+/// never a side effect of what a file happens to leave out.
+///
+/// Returns the merged document, how many days it replaced, and how many it
+/// added.
+pub fn merge_days_into(stored: &str, patch: &str) -> (String, usize, usize) {
+    let (_, mut days) = sections(stored);
+    let (preamble, incoming) = sections(patch);
+    let (mut updated, mut added) = (0, 0);
+    for section in incoming {
+        let at = section_id(&section)
+            .and_then(|id| days.iter().position(|d| section_id(d).as_deref() == Some(&id)));
+        match at {
+            Some(i) => {
+                days[i] = section;
+                updated += 1;
+            }
+            None => {
+                days.push(section);
+                added += 1;
+            }
+        }
+    }
+    (format!("{preamble}{}", days.concat()), updated, added)
+}
+
 /// Give every day section an id, leaving existing ones and every other byte
 /// untouched. Surgical rather than a re-serialize because a plan is stored as
 /// the user's own markdown and there is no `plan_to_markdown` to round-trip
@@ -507,6 +582,44 @@ impl PlanStore {
         Ok((summary, plan))
     }
 
+    /// Apply an uploaded plan file to the plan it belongs to, day by day.
+    ///
+    /// This is what the upload button uses: a file holding only the days you
+    /// fixed updates exactly those and leaves the rest of the plan standing.
+    /// A file belonging to no stored plan is simply saved as a new one, so
+    /// uploading a brand-new plan still works the way it always did.
+    ///
+    /// Returns the days replaced and the days added alongside the summary.
+    pub fn patch(
+        &self,
+        source: &str,
+        now: &str,
+    ) -> Result<(PlanSummary, Plan, usize, usize), Vec<ParseError>> {
+        let uploaded = parse_plan(source)?;
+        let owner = ids::extract_id(source)
+            .and_then(|id| self.find_by_id(&id))
+            .or_else(|| self.find_by_day_ids(&uploaded.days));
+        let stored = owner.as_deref().and_then(|slug| self.read_source(slug).ok());
+        let (Some(slug), Some(stored)) = (owner, stored) else {
+            let (summary, plan) = self.save(source, None, now)?;
+            let added = plan.days.len();
+            return Ok((summary, plan, 0, added));
+        };
+
+        let (merged, updated, added) = merge_days_into(&stored, source);
+        // The merged document keeps the stored plan's identity even when the
+        // uploaded file has none of its own.
+        let merged = match ids::extract_id(&stored) {
+            Some(id) => ids::set_id(&merged, &id),
+            None => merged,
+        };
+        // A merge can still fail to parse — two days sharing an id, say. Error
+        // lines then point into the merged document rather than the uploaded
+        // file, but such a collision can only come from the upload's own ids.
+        let (summary, plan) = self.save(&merged, Some(&slug), now)?;
+        Ok((summary, plan, updated, added))
+    }
+
     pub fn delete(&self, slug: &str) -> Result<(), String> {
         fs::remove_file(self.path(slug)).map_err(|e| format!("cannot delete plan '{slug}': {e}"))
     }
@@ -517,6 +630,7 @@ mod tests {
     use super::*;
 
     const NOW: &str = "2026-08-09T13:45:31Z";
+    const LATER: &str = "2026-08-10T09:00:00Z";
 
     const PLAN: &str = "\
 # 531 Cycle 1
@@ -667,6 +781,78 @@ Brace hard.
             first.days.iter().map(|d| d.id.clone()).collect::<Vec<_>>(),
             again.days.iter().map(|d| d.id.clone()).collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn a_patch_updates_only_the_days_it_carries() {
+        let s = plan_store("patch");
+        let (sum, plan) = s.save(PLAN, None, NOW).unwrap();
+        let second = plan.days[1].id.clone().unwrap();
+
+        // A file holding one corrected day, the way you would hand it back
+        // after fixing it: the plan title, that day, nothing else.
+        let fix = format!(
+            "# 531 Cycle 1\n\n## 2026-08-01: Bench Day\n- id: {second}\n### Bench Press\n- intervals: 5\n- work: 1:30\n"
+        );
+        let (again, merged, updated, added) = s.patch(&fix, LATER).unwrap();
+
+        assert_eq!(again.slug, sum.slug, "the same plan, not a second one");
+        assert_eq!((updated, added), (1, 0));
+        assert_eq!(merged.days.len(), 2, "the untouched day is still there");
+        assert_eq!(merged.days[0].name, "Heavy Squats");
+        assert!(merged.days[0].workout_md.contains("Brace hard."));
+        assert!(merged.days[1].workout_md.contains("- work: 1:30"));
+        // Identity survives, which is what lets the sync update the calendar
+        // entry this day already scheduled.
+        assert_eq!(merged.days[1].id.as_deref(), Some(second.as_str()));
+    }
+
+    #[test]
+    fn a_patch_that_re_dates_a_day_moves_it_rather_than_copying_it() {
+        let s = plan_store("patch-redate");
+        let (_, plan) = s.save(PLAN, None, NOW).unwrap();
+        let first = plan.days[0].id.clone().unwrap();
+
+        let fix =
+            format!("# 531 Cycle 1\n\n## 2026-08-05: Heavy Squats\n- id: {first}\n### Back Squat\n- work: 2:00\n");
+        let (_, merged, updated, added) = s.patch(&fix, LATER).unwrap();
+
+        assert_eq!((updated, added), (1, 0));
+        assert_eq!(merged.days.len(), 2);
+        assert!(!merged.days.iter().any(|d| d.date == "2026-07-30"));
+        assert_eq!(merged.days.iter().filter(|d| d.id.as_deref() == Some(&first)).count(), 1);
+    }
+
+    #[test]
+    fn a_patch_day_with_no_id_is_added_as_a_new_one() {
+        let s = plan_store("patch-newday");
+        let (sum, plan) = s.save(PLAN, None, NOW).unwrap();
+        let known: Vec<_> = plan.days.iter().map(|d| d.id.clone()).collect();
+        let plan_id = ids::extract_id(&s.read_source(&sum.slug).unwrap()).unwrap();
+
+        // The plan id says which plan this belongs to; the day has no id to
+        // match on, so it can only be new — and it must not displace the day
+        // that happens to share its date.
+        let fix = format!(
+            "# 531 Cycle 1\n- id: {plan_id}\n\n## 2026-08-01: Evening Cardio\n### Row\n- work: 5:00\n"
+        );
+        let (_, merged, updated, added) = s.patch(&fix, LATER).unwrap();
+
+        assert_eq!((updated, added), (0, 1));
+        assert_eq!(merged.days.len(), 3);
+        let cardio = merged.days.iter().find(|d| d.name == "Evening Cardio").unwrap();
+        assert_eq!(cardio.date, "2026-08-01");
+        assert!(cardio.id.is_some(), "saving mints one");
+        assert!(!known.contains(&cardio.id), "and it is not another day's");
+    }
+
+    #[test]
+    fn an_upload_belonging_to_no_stored_plan_is_still_a_new_plan() {
+        let s = plan_store("patch-new");
+        let (summary, plan, updated, added) = s.patch(PLAN, NOW).unwrap();
+        assert_eq!(summary.slug, "531-cycle-1");
+        assert_eq!((updated, added), (0, 2));
+        assert_eq!(plan.days.len(), 2);
     }
 
     #[test]

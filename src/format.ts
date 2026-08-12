@@ -85,8 +85,13 @@ Rules:
     when you change that day's exercises or move it to another date. The id is
     how the app recognises the day it already scheduled, so the calendar entry
     is updated or moved rather than duplicated.
-  - Give a genuinely new day a new UUID. Deleting a day from the file removes its
-    still-planned entry from the calendar.
+  - Give a genuinely new day a new UUID.
+- A file need not contain the whole plan. Uploading one holding only the days
+  you changed updates exactly those and leaves every other day standing, which
+  is the normal way to fix a plan. Days are matched by id alone — a section
+  with no id can only be new, so it is added rather than replacing anything.
+  Dropping a day from a plan is done with "Replace", which overwrites the plan
+  with the file and unschedules whatever the file leaves out.
 - \`### Exercise Name\` — the exercises of that day. Inside each exercise,
   bullet lines set parameters (all optional except \`work\`):
   - \`intervals\`: whole number >= 1 — how many work intervals (default 1)
@@ -99,10 +104,9 @@ Rules:
 - Every other line inside an exercise is free markdown shown on screen while
   it runs (cues, notes, target weights).
 - Re-importing a plan matches each day to what it scheduled before, by id, from
-  today onward: edited days are updated in place, re-dated days move and keep
-  their history, and days dropped from the file are unscheduled. A day you have
-  already completed is never replaced and never duplicated. Dates in the past
-  are left alone entirely.
+  today onward: edited days are updated in place, and re-dated days move and
+  keep their history. A day you have already completed is never replaced and
+  never duplicated. Dates in the past are left alone entirely.
 
 Example:
 

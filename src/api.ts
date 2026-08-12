@@ -110,6 +110,14 @@ export interface PlanSummary {
   error: string | null;
 }
 
+/** What an uploaded plan file did to the plan it belongs to. */
+export interface PlanImport {
+  summary: PlanSummary;
+  updated: number;
+  added: number;
+  synced: number;
+}
+
 export interface DaySummary {
   date: string;
   entries: { name: string; status: DayStatus }[];
@@ -249,6 +257,9 @@ export const api = {
   getPlanSource: (slug: string) => invoke<string>("get_plan_source", { slug }),
   savePlan: (source: string, prevSlug: string | null) =>
     invoke<PlanSummary>("save_plan", { source, prevSlug, today: todayStr() }),
+  /** Upload a plan file: updates the days it carries, leaves the rest alone. */
+  importPlan: (source: string) =>
+    invoke<PlanImport>("import_plan", { source, today: todayStr() }),
   syncPlan: (slug: string) => invoke<number>("sync_plan", { slug, today: todayStr() }),
   deletePlan: (slug: string) => invoke<void>("delete_plan", { slug }),
   /** The whole library, plans and calendar as one markdown document. */

@@ -1,4 +1,11 @@
-import { api, fmtDuration, todayStr, type ImportReport, type ParseError } from "../api";
+import {
+  api,
+  fmtDuration,
+  todayStr,
+  type ImportReport,
+  type ParseError,
+  type PlanImport,
+} from "../api";
 import { copyText } from "../clipboard";
 import { saveMarkdownFile } from "../files";
 import { FORMAT_GUIDE, PLAN_FORMAT_GUIDE } from "../format";
@@ -95,7 +102,7 @@ export async function renderLibrary(root: HTMLElement) {
                          </div>
                          <div class="actions compact">
                            <button class="btn primary plan-sync" data-slug="${esc(p.slug)}">⟳ Sync</button>
-                           <button class="btn plan-newver" data-slug="${esc(p.slug)}">⇧ Version</button>
+                           <button class="btn plan-newver" data-slug="${esc(p.slug)}">⇧ Replace</button>
                            <button class="btn plan-export" data-slug="${esc(p.slug)}">⇩ Export</button>
                            <button class="btn plan-copy" data-slug="${esc(p.slug)}">⧉ Copy</button>
                            <button class="btn danger plan-delete" data-slug="${esc(p.slug)}">Delete</button>
@@ -176,6 +183,16 @@ export async function renderLibrary(root: HTMLElement) {
     el.scrollIntoView({ block: "nearest" });
   }
 
+  /** Say what the upload did to the plan, since it no longer just replaces it. */
+  function planImportSummary(r: PlanImport): string {
+    const parts: string[] = [];
+    if (r.updated) parts.push(`${r.updated} day${r.updated === 1 ? "" : "s"} updated`);
+    if (r.added) parts.push(`${r.added} added`);
+    if (parts.length === 0) parts.push("nothing to change");
+    const synced = r.synced ? `, ${r.synced} synced to the calendar` : "";
+    return `✓ "${r.summary.name}" — ${parts.join(", ")}${synced}`;
+  }
+
   function showParseErrors(e: unknown) {
     const errs = e as ParseError[];
     showStatus(
@@ -206,8 +223,7 @@ export async function renderLibrary(root: HTMLElement) {
       if (bundle.status === "ok") {
         message = restoreSummary(await api.importBundle(text));
       } else if ((await api.parsePlanPreview(text)).status === "ok") {
-        const sum = await api.savePlan(text, null);
-        message = `✓ "${sum.name}" saved — ${sum.day_count} days synced to the calendar`;
+        message = planImportSummary(await api.importPlan(text));
       } else {
         const sum = await api.saveWorkout(text, null);
         message = `✓ "${sum.name}" imported`;
@@ -242,8 +258,10 @@ export async function renderLibrary(root: HTMLElement) {
     const file = planFile.files?.[0];
     if (!file) return;
     const text = await file.text();
-    // "Version" names the plan being replaced, so it stays a direct save;
-    // a plain upload goes through the router like every other file.
+    // "Replace" names the plan to overwrite, so it stays a direct save — the
+    // one path where days missing from the file are days you meant to drop.
+    // A plain upload goes through the router like every other file, which
+    // patches the days it carries and leaves the rest standing.
     if (!newVersionSlug) {
       await importUpload(text);
       return;
@@ -251,7 +269,7 @@ export async function renderLibrary(root: HTMLElement) {
     try {
       const sum = await api.savePlan(text, newVersionSlug);
       await renderLibrary(root);
-      showStatus(`✓ "${sum.name}" saved — ${sum.day_count} days synced to the calendar`, true);
+      showStatus(`✓ "${sum.name}" replaced — ${sum.day_count} days synced to the calendar`, true);
     } catch (e) {
       showParseErrors(e);
     }
