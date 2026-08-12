@@ -19,6 +19,9 @@ export async function renderCalendar(root: HTMLElement, dateArg: string | null) 
   let [viewYear, viewMonth] = selected.split("-").map(Number);
   let movingIdx: number | null = null;
   let showLibraryPicker = false;
+  /** Plan slug → title. An entry stores the slug that scheduled it, which is a
+   *  file name; what it should say is what the plan is called. */
+  let planNames = new Map<string, string>();
 
   function select(date: string) {
     const target = `#/calendar/${date}`;
@@ -36,6 +39,13 @@ export async function renderCalendar(root: HTMLElement, dateArg: string | null) 
     el.textContent = msg;
   }
 
+  /** The plan an entry came from, by name — falling back to the slug for a
+   *  plan that has since been deleted, which still says where it came from. */
+  function planChip(slug: string | null): string {
+    if (!slug) return "";
+    return ` · plan: ${esc(planNames.get(slug) ?? slug)}`;
+  }
+
   function entryCard(
     e: DayEntryInfo,
     i: number,
@@ -51,7 +61,7 @@ export async function renderCalendar(root: HTMLElement, dateArg: string | null) 
       <div class="day-entry ${done ? "done" : ""}">
         <a class="info tappable" href="#/view/@${selected}:${i}">
           <span class="name">${esc(e.name)}</span>
-          <span class="meta">${done ? `✓ done${when}` : "⧗ planned"}${duration}${e.source_slug ? ` · from library` : ""}${e.source_plan ? ` · plan: ${esc(e.source_plan)}` : ""}${noRestChip(noRestCount)}</span>
+          <span class="meta">${done ? `✓ done${when}` : "⧗ planned"}${duration}${e.source_slug ? ` · from library` : ""}${planChip(e.source_plan)}${noRestChip(noRestCount)}</span>
         </a>
         ${
           movingIdx === i
@@ -73,7 +83,11 @@ export async function renderCalendar(root: HTMLElement, dateArg: string | null) 
   }
 
   async function render() {
-    const summaries = await api.getMonth(viewYear, viewMonth);
+    const [summaries, plans] = await Promise.all([
+      api.getMonth(viewYear, viewMonth),
+      api.listPlans(),
+    ]);
+    planNames = new Map(plans.map((p) => [p.slug, p.name]));
     const byDate = new Map(summaries.map((s) => [s.date, s.entries]));
     const entries: DayEntryInfo[] = await api.getDay(selected).catch(() => []);
     // One parse per entry, read for both its duration and its warnings.
