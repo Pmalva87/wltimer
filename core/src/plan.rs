@@ -791,6 +791,38 @@ impl PlanStore {
         Ok((summary, plan, PatchCounts { updated, added, removed }))
     }
 
+    /// Rename a plan, **keeping its slug**.
+    ///
+    /// Calendar entries name the plan that scheduled them by slug, in
+    /// `source_plan`, so re-deriving the file name from the new title would
+    /// strand every entry this plan owns — both the unschedule pass and the
+    /// guard against duplicating a finished day key on it. The title is what
+    /// you read; the slug is a file name, and nothing is gained by keeping the
+    /// two in step.
+    ///
+    /// It deliberately leaves `updated` alone. That stamp answers "is this a
+    /// newer version of these days", and a rename is not: bumping it would let
+    /// renaming a plan overwrite a day you had edited on the calendar.
+    pub fn rename(&self, slug: &str, name: &str) -> Result<PlanSummary, String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("give the plan a name".into());
+        }
+        let source = retitle(&self.read_source(slug)?, name);
+        let plan = parse_plan(&source)
+            .map_err(|e| format!("line {}: {}", e[0].line, e[0].message))?;
+        zio::write_compressed(&self.path(slug), source.as_bytes())
+            .map_err(|e| format!("cannot save plan: {e}"))?;
+        Ok(PlanSummary {
+            slug: slug.to_string(),
+            name: plan.name,
+            day_count: plan.days.len(),
+            first_date: plan.days.first().map(|d| d.date.clone()).unwrap_or_default(),
+            last_date: plan.days.last().map(|d| d.date.clone()).unwrap_or_default(),
+            error: None,
+        })
+    }
+
     pub fn delete(&self, slug: &str) -> Result<(), String> {
         fs::remove_file(self.path(slug)).map_err(|e| format!("cannot delete plan '{slug}': {e}"))
     }
@@ -1081,6 +1113,27 @@ Brace hard.
         let stored = s.read_source(&sum.slug).unwrap();
         assert!(!stored.contains("deleted"), "{stored}");
         assert!(!stored.contains(&doomed), "{stored}");
+    }
+
+    #[test]
+    fn renaming_keeps_the_slug_the_days_and_the_version() {
+        let s = plan_store("rename");
+        let (sum, _) = s.save(PLAN, None, NOW).unwrap();
+        let before = s.read_source(&sum.slug).unwrap();
+
+        let renamed = s.rename(&sum.slug, "531 Cycle 2").unwrap();
+        assert_eq!(renamed.name, "531 Cycle 2");
+        // The slug is what calendar entries point at, so it must not move.
+        assert_eq!(renamed.slug, sum.slug);
+        assert_eq!(s.list().len(), 1);
+
+        let after = s.read_source(&sum.slug).unwrap();
+        assert_eq!(parse_plan(&after).unwrap().days.len(), 2);
+        assert_eq!(ids::extract_id(&after), ids::extract_id(&before));
+        // A rename is not a new version of any day: leaving the stamp alone is
+        // what stops it from winning against a calendar edit on the next sync.
+        assert_eq!(ids::extract_updated(&after).as_deref(), Some(NOW));
+        assert!(s.rename(&sum.slug, "  ").is_err());
     }
 
     #[test]

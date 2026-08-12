@@ -14,9 +14,11 @@ import { esc } from "./library";
  * Nothing here mutates anything — it is the screen to open when you want to
  * check what a workout is without risking an edit to it.
  */
-export async function renderView(root: HTMLElement, target: string) {
+export async function renderView(root: HTMLElement, target: string, from?: string | null) {
   const dayMatch = target.match(/^@(\d{4}-\d{2}-\d{2}):(\d+)$/);
-  const backHash = dayMatch ? `#/calendar/${dayMatch[1]}` : "#/library";
+  // Back goes where you came from when the route says so, else to the list
+  // this workout belongs to.
+  const backHash = from ?? (dayMatch ? `#/calendar/${dayMatch[1]}` : "#/library");
   const runHash = dayMatch ? `#/run/@${dayMatch[1]}:${dayMatch[2]}` : `#/run/${encodeURIComponent(target)}`;
   const editHash = dayMatch ? `#/edit/@${dayMatch[1]}:${dayMatch[2]}` : `#/edit/${encodeURIComponent(target)}`;
 

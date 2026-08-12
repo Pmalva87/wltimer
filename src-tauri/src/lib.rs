@@ -50,6 +50,7 @@ pub fn run() {
             commands::save_plan,
             commands::import_plan,
             commands::view_plan,
+            commands::rename_plan,
             commands::delete_plan_day,
             commands::list_day_entries,
             commands::create_plan_from_days,

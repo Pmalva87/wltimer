@@ -18,6 +18,7 @@ function shortDate(date: string): string {
  */
 export async function renderPlan(root: HTMLElement, slug: string) {
   let view: PlanView;
+  let renaming = false;
 
   function showStatus(msg: string, ok: boolean) {
     const el = root.querySelector<HTMLElement>("#planstatus");
@@ -43,7 +44,7 @@ export async function renderPlan(root: HTMLElement, slug: string) {
         : "";
     const link =
       d.entry_date !== null && d.entry_index !== null
-        ? `#/view/@${d.entry_date}:${d.entry_index}`
+        ? `#/view/@${d.entry_date}:${d.entry_index}/plan/${encodeURIComponent(slug)}`
         : null;
     const title = `<span class="name">${esc(d.name)}</span>
         <span class="meta">${shortDate(d.date)} · ${fmtDuration(d.total_secs)}${moved} · ${dayState(d)}</span>`;
@@ -52,6 +53,29 @@ export async function renderPlan(root: HTMLElement, slug: string) {
         ${link ? `<a class="info tappable" href="${link}">${title}</a>` : `<div class="info">${title}</div>`}
         ${d.id ? `<button class="btn danger day-remove" data-id="${esc(d.id)}">🗑 Remove</button>` : ""}
       </div>`;
+  }
+
+  /**
+   * What is left to train, then what has been. A plan is read to answer
+   * "what's next", and days already done are history that should not be in
+   * the way of it — so they get their own section rather than a status chip
+   * you have to scan for.
+   */
+  function daySections(): string {
+    const todo = view.days.filter((d) => d.status !== "done");
+    const done = view.days.filter((d) => d.status === "done");
+    if (view.days.length === 0) {
+      return `<div class="empty small">This plan has no days.</div>`;
+    }
+    const section = (title: string, days: PlanDayView[]) =>
+      days.length === 0
+        ? ""
+        : `<div class="plan-section">${title} · ${days.length}</div>${days.map(dayRow).join("")}`;
+    return (
+      section("To do", todo) +
+      (todo.length === 0 ? `<div class="empty small">Every day of this plan is done. 💪</div>` : "") +
+      section("Done", done)
+    );
   }
 
   async function render() {
@@ -80,15 +104,44 @@ export async function renderPlan(root: HTMLElement, slug: string) {
             ${view.updated ? `<br>last changed ${new Date(view.updated).toLocaleString()}` : ""}
           </div>
           ${view.error ? `<div class="editor-status invalid">${esc(view.error)}</div>` : ""}
-          <div class="plan-actions">
-            <button class="btn primary" id="plansync">⟳ Sync</button>
-            <button class="btn" id="planexport">⇩ Export</button>
-            <button class="btn" id="plancopy">⧉ Copy</button>
-          </div>
+          ${
+            renaming
+              ? `<div class="plan-rename">
+                   <input type="text" id="planname" class="text-input" value="${esc(view.name)}">
+                   <button class="btn primary" id="planrenameok">Save</button>
+                   <button class="btn" id="planrenamecancel">Cancel</button>
+                 </div>`
+              : `<div class="plan-actions">
+                   <button class="btn primary" id="plansync">⟳ Sync</button>
+                   <button class="btn" id="planrename">✎ Rename</button>
+                   <button class="btn" id="planexport">⇩ Export</button>
+                   <button class="btn" id="plancopy">⧉ Copy</button>
+                 </div>`
+          }
           <div id="planstatus" class="editor-status"></div>
-          ${view.days.map(dayRow).join("")}
+          ${daySections()}
         </div>
       </div>`;
+
+    root.querySelector("#planrename")?.addEventListener("click", () => {
+      renaming = true;
+      void render();
+    });
+    root.querySelector("#planrenamecancel")?.addEventListener("click", () => {
+      renaming = false;
+      void render();
+    });
+    root.querySelector("#planrenameok")?.addEventListener("click", async () => {
+      const name = root.querySelector<HTMLInputElement>("#planname")!.value;
+      try {
+        await api.renamePlan(slug, name);
+        renaming = false;
+        await render();
+        showStatus("✓ renamed", true);
+      } catch (e) {
+        showStatus(String(e), false);
+      }
+    });
 
     root.querySelector("#plansync")?.addEventListener("click", async () => {
       try {

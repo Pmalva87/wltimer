@@ -594,6 +594,17 @@ pub fn view_plan(state: State<AppState>, slug: String) -> Result<PlanView, Strin
     Ok(PlanView { slug, name: plan.name, updated, days, error: None })
 }
 
+/// Rename a plan. Its slug does not move, so the calendar entries that name it
+/// stay attached, and no sync is needed — no day changed.
+#[tauri::command]
+pub fn rename_plan(
+    state: State<AppState>,
+    slug: String,
+    name: String,
+) -> Result<PlanSummary, String> {
+    state.plans.rename(&slug, &name)
+}
+
 /// Remove one day from a plan, and unschedule it if it is still only planned.
 ///
 /// The on-phone counterpart to uploading a `- deleted: true` section: same

@@ -303,6 +303,9 @@ export const api = {
   importPlan: (source: string) =>
     invoke<PlanImport>("import_plan", { source, today: todayStr() }),
   viewPlan: (slug: string) => invoke<PlanView>("view_plan", { slug }),
+  /** Rename a plan; its slug stays put, so calendar entries stay attached. */
+  renamePlan: (slug: string, name: string) =>
+    invoke<PlanSummary>("rename_plan", { slug, name }),
   /** Remove a day from a plan, unscheduling it if it is still only planned. */
   deletePlanDay: (slug: string, dayId: string) =>
     invoke<SyncReport>("delete_plan_day", { slug, dayId, today: todayStr() }),

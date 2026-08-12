@@ -19,8 +19,13 @@ async function route() {
     cleanup = undefined;
   }
   const hash = location.hash || "#/";
-  const [, screen, arg] = hash.split("/");
+  const [, screen, arg, ...rest] = hash.split("/");
   const slug = arg ? decodeURIComponent(arg) : null;
+  // Trailing segments say where a screen was opened from, so its Back button
+  // can return there — `#/view/@2026-08-01:0/plan/531-cycle-1` reads as "this
+  // entry, reached from that plan". Survives a reload, unlike a remembered
+  // history entry.
+  const from = rest.length ? `#/${rest.map(decodeURIComponent).join("/")}` : null;
   if (screen === "quick" || (screen === "edit" && !slug)) {
     rememberTab("#/quick");
     cleanup = await renderBuilder(app, null, true);
@@ -37,7 +42,7 @@ async function route() {
     rememberTab("#/calendar");
     cleanup = await renderCalendar(app, slug);
   } else if (screen === "view" && slug) {
-    cleanup = await renderView(app, slug);
+    cleanup = await renderView(app, slug, from);
   } else if (screen === "run" && slug) {
     cleanup = await renderRun(app, slug);
   } else {
