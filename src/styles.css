@@ -126,6 +126,91 @@ body {
 .section-head .section-actions {
   display: flex;
   gap: 0.5rem;
+  /* Three actions on a narrow phone: wrap rather than crush the labels. */
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* ---- plan from calendar ---- */
+
+.pf-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 1rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.pf-range {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.pf-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.pf-actions .btn {
+  flex: 1;
+}
+
+.pf-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.pf-day {
+  color: var(--muted);
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-top: 0.5rem;
+}
+
+.pf-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: var(--panel);
+  border-radius: 0.6rem;
+  padding: 0.6rem 0.8rem;
+}
+
+.pf-row input {
+  /* A checkbox at its default size is a poor target on a phone. */
+  width: 1.3rem;
+  height: 1.3rem;
+  flex: none;
+}
+
+.pf-row .info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.pf-row .name {
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.pf-row .meta {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.pf-footer {
+  padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom));
+  border-top: 1px solid #334155;
+}
+
+.pf-footer .btn {
+  width: 100%;
 }
 
 .section-head h2 {

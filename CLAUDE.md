@@ -87,6 +87,14 @@ is dropped and the workout starts over. `Engine::restore` clamps a
 `phase_idx` past the end, so a session saved against a since-edited workout
 still resumes.
 
+`plan::plan_to_markdown` goes the other way — calendar entries in, plan document
+out (`# Title` → `## <date>: Title`, `##` exercises demoted to `###`), splicing
+stored bytes rather than re-serialising a parsed `Workout` so notes survive
+verbatim. It is the **one copy in the app that preserves ids**: the generated
+plan is meant to own the entries it was built from, so a later fix to a day
+updates that entry instead of scheduling a second copy. `create_plan_from_days`
+therefore does not sync afterwards, for the reason `bundle::restore` does not.
+
 `RunOrigin` is the one piece of state that decides what finishing a run *means*:
 a `Day` origin flips that calendar entry to done — moving it to the day it was
 actually finished first, if that is not the day it was scheduled for —

@@ -487,6 +487,87 @@ pub fn import_plan(
     Ok(PlanImport { summary, counts, synced })
 }
 
+/// One calendar entry offered for picking when building a plan from history.
+#[derive(Serialize)]
+pub struct DayPick {
+    pub date: String,
+    pub index: usize,
+    pub name: String,
+    pub status: DayStatus,
+    pub completed_at: Option<String>,
+}
+
+/// Every calendar entry between two dates, for the "from calendar" picker.
+#[tauri::command]
+pub fn list_day_entries(
+    state: State<AppState>,
+    from: String,
+    to: String,
+) -> Result<Vec<DayPick>, String> {
+    check_date(&from)?;
+    check_date(&to)?;
+    let mut out = Vec::new();
+    for date in state.days.dates_from(&from) {
+        if date > to {
+            break;
+        }
+        for (index, entry) in state.days.load(&date).iter().enumerate() {
+            out.push(DayPick {
+                date: date.clone(),
+                index,
+                name: days::entry_name(entry),
+                status: entry.status,
+                completed_at: entry.completed_at.clone(),
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// Which calendar entry to take, as the picker names it.
+#[derive(serde::Deserialize)]
+pub struct DayRef {
+    pub date: String,
+    pub index: usize,
+}
+
+/// Build a plan out of calendar entries you pick — the reverse of scheduling,
+/// and what makes a plan something you can fix rather than only import.
+///
+/// The generated days keep the entries' ids, so the plan owns them: fixing a
+/// day later updates the entry it was built from. It deliberately does **not**
+/// sync afterwards, for the reason `bundle::restore` does not either — those
+/// entries already are the record, and re-scheduling on top of them could only
+/// disturb what it was just built from.
+#[tauri::command]
+pub fn create_plan_from_days(
+    state: State<AppState>,
+    name: String,
+    picks: Vec<DayRef>,
+) -> Result<PlanSummary, Vec<ParseError>> {
+    let fail = |message: String| vec![ParseError { line: 1, message }];
+    if picks.is_empty() {
+        return Err(fail("pick at least one workout".into()));
+    }
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(fail("give the plan a name".into()));
+    }
+    let mut days = Vec::with_capacity(picks.len());
+    for pick in &picks {
+        check_date(&pick.date).map_err(fail)?;
+        let entries = state.days.load(&pick.date);
+        let entry = entries
+            .get(pick.index)
+            .ok_or_else(|| fail(format!("no entry {} on {}", pick.index, pick.date)))?;
+        days.push((pick.date.clone(), entry.markdown.clone()));
+    }
+    let (summary, _) = state
+        .plans
+        .save(&plan::plan_to_markdown(name, &days), None, &now())?;
+    Ok(summary)
+}
+
 /// Re-apply a stored plan's upcoming days to the calendar; returns how many
 /// days were scheduled.
 #[tauri::command]

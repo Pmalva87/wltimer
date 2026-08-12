@@ -297,6 +297,48 @@ pub fn merge_into_calendar(
     (synced, dirty)
 }
 
+/// Build a plan document from calendar days: `(date, workout markdown)` in the
+/// order they should appear.
+///
+/// The inverse of what [`parse_plan`] does to each day — `# Title` becomes the
+/// `## YYYY-MM-DD: Title` heading and every `## Exercise` is demoted to `###`.
+/// It splices the stored bytes rather than re-serialising a parsed `Workout`,
+/// so notes, cues and formatting survive exactly as written.
+///
+/// **Ids are carried through, deliberately.** Every other copy in this app
+/// mints a new id — scheduling a template, promoting a day, recording a run —
+/// because a copy is a new occurrence. This one is the exception: the plan is
+/// meant to *own* the entries it was built from, so that later fixing a day in
+/// the plan updates the calendar entry it came from instead of scheduling a
+/// second copy beside it.
+pub fn plan_to_markdown(name: &str, days: &[(String, String)]) -> String {
+    let mut out = format!("# {name}\n");
+    for (date, workout_md) in days {
+        let mut lines = workout_md.lines().skip_while(|l| !is_title(l));
+        let title = lines.next().map(day_title).unwrap_or_default();
+        out.push_str(&format!("\n## {date}: {title}\n"));
+        for line in lines {
+            match line.trim().strip_prefix("## ") {
+                Some(exercise) => out.push_str(&format!("### {exercise}\n")),
+                None => {
+                    out.push_str(line);
+                    out.push('\n');
+                }
+            }
+        }
+    }
+    out
+}
+
+fn is_title(line: &str) -> bool {
+    let t = line.trim_start();
+    t.starts_with("# ") && !t.starts_with("## ")
+}
+
+fn day_title(title_line: &str) -> String {
+    title_line.trim_start().trim_start_matches("# ").trim().to_string()
+}
+
 /// Split a plan document into its preamble — the title and its bullets — and
 /// one string per `## ` day section, in file order. Slices the user's own bytes
 /// rather than re-serialising, for the same reason [`ensure_day_ids`] is
@@ -912,6 +954,50 @@ Brace hard.
         assert_eq!(cardio.date, "2026-08-01");
         assert!(cardio.id.is_some(), "saving mints one");
         assert!(!known.contains(&cardio.id), "and it is not another day's");
+    }
+
+    #[test]
+    fn a_plan_built_from_calendar_days_round_trips_back_to_them() {
+        // What "generate a plan from the calendar" has to guarantee: parsing
+        // the result gives back the very documents it was built from, ids and
+        // all, so a later fix updates those entries instead of copying them.
+        let squats = ids::set_updated(
+            &ids::ensure_id("# Heavy Squats\n\n## Back Squat\n- intervals: 5\n- work: 2:00\n\nBrace hard.\n").0,
+            NOW,
+        );
+        let cardio = ids::ensure_id("# Evening Cardio\n\n## Row\n- work: 5:00\n").0;
+        let days = vec![
+            ("2026-07-30".to_string(), squats.clone()),
+            // Same date twice: the calendar allows it, so a plan must too.
+            ("2026-07-30".to_string(), cardio.clone()),
+        ];
+
+        let plan = parse_plan(&plan_to_markdown("August", &days)).unwrap();
+        assert_eq!(plan.name, "August");
+        assert_eq!(plan.days.len(), 2);
+        assert_eq!(plan.days[0].name, "Heavy Squats");
+        assert_eq!(plan.days[1].name, "Evening Cardio");
+        assert!(plan.days[0].workout_md.contains("Brace hard."));
+        assert_eq!(plan.days[0].id, ids::extract_id(&squats));
+        assert_eq!(plan.days[1].id, ids::extract_id(&cardio));
+        // The workout each day converts back to is the one that went in.
+        let back = parser::parse_workout(&plan.days[0].workout_md).unwrap();
+        let original = parser::parse_workout(&squats).unwrap();
+        assert_eq!(back, original);
+    }
+
+    #[test]
+    fn a_generated_plan_keeps_the_entries_ids_when_stored() {
+        let s = plan_store("generated");
+        let md = ids::ensure_id("# Heavy Squats\n\n## Back Squat\n- work: 2:00\n").0;
+        let id = ids::extract_id(&md).unwrap();
+        let source = plan_to_markdown("From calendar", &[("2026-07-30".into(), md)]);
+
+        let (summary, plan) = s.save(&source, None, NOW).unwrap();
+        assert_eq!(plan.days[0].id.as_deref(), Some(id.as_str()));
+        // The plan itself is new, so it gets an identity of its own.
+        let stored = s.read_source(&summary.slug).unwrap();
+        assert!(ids::extract_id(&stored).is_some_and(|plan_id| plan_id != id));
     }
 
     #[test]

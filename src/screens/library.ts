@@ -77,6 +77,7 @@ export async function renderLibrary(root: HTMLElement) {
           <h2>Plans</h2>
           <div class="section-actions">
             <button class="btn" id="uploadplan">📂 Upload</button>
+            <a class="btn" href="#/planfrom">📅 From calendar</a>
             <button class="btn" id="planformat">📄 Format .md</button>
           </div>
         </div>

@@ -110,6 +110,15 @@ export interface PlanSummary {
   error: string | null;
 }
 
+/** A calendar entry offered for picking when building a plan from history. */
+export interface DayPick {
+  date: string;
+  index: number;
+  name: string;
+  status: DayStatus;
+  completed_at: string | null;
+}
+
 /** What an uploaded plan file did to the plan it belongs to. */
 export interface PlanImport {
   summary: PlanSummary;
@@ -261,6 +270,11 @@ export const api = {
   /** Upload a plan file: updates the days it carries, leaves the rest alone. */
   importPlan: (source: string) =>
     invoke<PlanImport>("import_plan", { source, today: todayStr() }),
+  listDayEntries: (from: string, to: string) =>
+    invoke<DayPick[]>("list_day_entries", { from, to }),
+  /** Build a plan from calendar entries; the days keep those entries' ids. */
+  createPlanFromDays: (name: string, picks: { date: string; index: number }[]) =>
+    invoke<PlanSummary>("create_plan_from_days", { name, picks }),
   syncPlan: (slug: string) => invoke<number>("sync_plan", { slug, today: todayStr() }),
   deletePlan: (slug: string) => invoke<void>("delete_plan", { slug }),
   /** The whole library, plans and calendar as one markdown document. */
