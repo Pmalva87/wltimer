@@ -149,6 +149,16 @@ legacy `.md` files migrate):
 Calendar entries embed a full markdown copy rather than referencing a template,
 so day entries are independent of the library.
 
+`merge_into_calendar` takes the **plan's** `updated` stamp, not `now`, and that
+one argument carries the whole conflict rule: an entry stamped later than it was
+edited on the calendar after this version of the plan and is left alone, and
+entries the sync writes take that same stamp so a later sync reads them as the
+plan's own version rather than as edits. `sync_plan` therefore passes the stored
+stamp (Sync cannot clobber your edits) while `save_plan`/`import_plan` pass the
+`now` they just wrote the plan with (uploading a fix wins, which is what a fix
+is). A `SyncReport` comes back rather than a count, because "1 kept as you
+edited it" is the part worth showing.
+
 A plan has **two write paths, and which one a caller takes is a decision about
 deletion**. `PlanStore::patch` folds an uploaded file's `##` sections into the
 stored plan by workout id and never drops a day for being absent — that is what

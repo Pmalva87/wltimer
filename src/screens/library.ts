@@ -5,6 +5,7 @@ import {
   type ImportReport,
   type ParseError,
   type PlanImport,
+  type SyncReport,
 } from "../api";
 import { copyText } from "../clipboard";
 import { saveMarkdownFile } from "../files";
@@ -28,6 +29,22 @@ export function noRestChip(count: number): string {
 
 function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
+}
+
+/**
+ * What a sync did, in one line. `kept` and `done` are reported even though
+ * nothing happened to them: a day the plan did *not* write is exactly what
+ * someone re-syncing wants to know about.
+ */
+export function syncSummary(s: SyncReport): string {
+  const parts: string[] = [];
+  if (s.scheduled) parts.push(`${plural(s.scheduled, "day", "days")} scheduled`);
+  if (s.updated) parts.push(`${s.updated} updated`);
+  if (s.unscheduled) parts.push(`${s.unscheduled} unscheduled`);
+  if (parts.length === 0) parts.push("calendar unchanged");
+  if (s.kept) parts.push(`${s.kept} kept as you edited ${s.kept === 1 ? "it" : "them"}`);
+  if (s.done) parts.push(`${plural(s.done, "day", "days")} already done`);
+  return parts.join(", ");
 }
 
 /**
@@ -97,12 +114,13 @@ export async function renderLibrary(root: HTMLElement) {
                          </div>
                        </div>`
                     : `<div class="workout plan" data-i="${i}">
-                         <div class="info">
+                         <a class="info tappable" href="#/plan/${encodeURIComponent(p.slug)}">
                            <span class="name">📋 ${esc(p.name)}</span>
                            <span class="meta">${p.day_count} day${p.day_count === 1 ? "" : "s"} · ${p.first_date} → ${p.last_date}</span>
-                         </div>
+                         </a>
                          <div class="actions compact">
-                           <button class="btn primary plan-sync" data-slug="${esc(p.slug)}">⟳ Sync</button>
+                           <a class="btn primary" href="#/plan/${encodeURIComponent(p.slug)}">👁 View</a>
+                           <button class="btn plan-sync" data-slug="${esc(p.slug)}">⟳ Sync</button>
                            <button class="btn plan-newver" data-slug="${esc(p.slug)}">⇧ Replace</button>
                            <button class="btn plan-export" data-slug="${esc(p.slug)}">⇩ Export</button>
                            <button class="btn plan-copy" data-slug="${esc(p.slug)}">⧉ Copy</button>
@@ -191,8 +209,7 @@ export async function renderLibrary(root: HTMLElement) {
     if (r.added) parts.push(`${r.added} added`);
     if (r.removed) parts.push(`${r.removed} removed`);
     if (parts.length === 0) parts.push("nothing to change");
-    const synced = r.synced ? `, ${r.synced} synced to the calendar` : "";
-    return `✓ "${r.summary.name}" — ${parts.join(", ")}${synced}`;
+    return `✓ "${r.summary.name}" — ${parts.join(", ")} · ${syncSummary(r.sync)}`;
   }
 
   function showParseErrors(e: unknown) {
@@ -280,8 +297,7 @@ export async function renderLibrary(root: HTMLElement) {
   root.querySelectorAll<HTMLButtonElement>("button.plan-sync").forEach((btn) => {
     btn.addEventListener("click", async () => {
       try {
-        const n = await api.syncPlan(btn.dataset.slug!);
-        showStatus(`✓ synced — ${n} upcoming day${n === 1 ? "" : "s"} scheduled`, true);
+        showStatus(`✓ ${syncSummary(await api.syncPlan(btn.dataset.slug!))}`, true);
       } catch (e) {
         showStatus(String(e), false);
       }

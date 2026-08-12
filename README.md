@@ -98,6 +98,10 @@ What identity buys you:
 - The plan file itself carries an id too, so **re-uploading a corrected plan
   updates it** instead of adding "531 Cycle 1 (2)". A file written from a copy
   taken before plan ids existed is recognised by the day ids it still carries.
+- **A plan is readable.** Tapping one opens it: every day with its date,
+  duration and what became of it — planned, done, edited here, or no longer on
+  the calendar — plus Sync, Export, and a 🗑 that drops a single day (the
+  on-phone equivalent of uploading `- deleted: true`).
 - **A plan can be built from the calendar.** Workouts → Plans → 📅 From
   calendar picks a date range and lists every entry in it, done and planned;
   tick the ones you want and they become a plan. The days keep those entries'
@@ -110,6 +114,13 @@ What identity buys you:
   you upload; "Replace" still overwrites a whole plan with a file.
 - **A workout you have already finished is never replaced or duplicated by a
   sync.** The done entry stands; no planned copy appears beside it.
+- **A calendar entry you edited outranks the plan that scheduled it**, until
+  the plan itself changes. Syncing compares the two stamps and the newer wins,
+  so pressing Sync cannot undo a change you made on the calendar, while
+  uploading a fixed plan deliberately does. Entries a sync writes take the
+  plan's stamp rather than the current time, so they read as that version of
+  the plan instead of as edits made after it. The result says which is which:
+  "4 days scheduled, 1 kept as you edited it".
 - Copies get their own identity: scheduling a library template on a date,
   promoting a day entry into the library, and recording a finished run all mint
   a new id, so no two objects ever claim the same one.

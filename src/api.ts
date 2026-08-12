@@ -110,6 +110,28 @@ export interface PlanSummary {
   error: string | null;
 }
 
+/** A plan's day, together with what became of it on the calendar. */
+export interface PlanDayView {
+  id: string | null;
+  name: string;
+  date: string;
+  total_secs: number;
+  /** Where the entry actually sits — finishing a workout moves it. */
+  entry_date: string | null;
+  entry_index: number | null;
+  status: DayStatus | null;
+  /** Edited on the calendar since this version of the plan. */
+  edited: boolean;
+}
+
+export interface PlanView {
+  slug: string;
+  name: string;
+  updated: string | null;
+  days: PlanDayView[];
+  error: string | null;
+}
+
 /** A calendar entry offered for picking when building a plan from history. */
 export interface DayPick {
   date: string;
@@ -125,7 +147,17 @@ export interface PlanImport {
   updated: number;
   added: number;
   removed: number;
-  synced: number;
+  sync: SyncReport;
+}
+
+/** What a sync did to the calendar. */
+export interface SyncReport {
+  scheduled: number;
+  updated: number;
+  /** Entries edited on the calendar since this version of the plan. */
+  kept: number;
+  done: number;
+  unscheduled: number;
 }
 
 export interface DaySummary {
@@ -270,12 +302,17 @@ export const api = {
   /** Upload a plan file: updates the days it carries, leaves the rest alone. */
   importPlan: (source: string) =>
     invoke<PlanImport>("import_plan", { source, today: todayStr() }),
+  viewPlan: (slug: string) => invoke<PlanView>("view_plan", { slug }),
+  /** Remove a day from a plan, unscheduling it if it is still only planned. */
+  deletePlanDay: (slug: string, dayId: string) =>
+    invoke<SyncReport>("delete_plan_day", { slug, dayId, today: todayStr() }),
   listDayEntries: (from: string, to: string) =>
     invoke<DayPick[]>("list_day_entries", { from, to }),
   /** Build a plan from calendar entries; the days keep those entries' ids. */
   createPlanFromDays: (name: string, picks: { date: string; index: number }[]) =>
     invoke<PlanSummary>("create_plan_from_days", { name, picks }),
-  syncPlan: (slug: string) => invoke<number>("sync_plan", { slug, today: todayStr() }),
+  syncPlan: (slug: string) =>
+    invoke<SyncReport>("sync_plan", { slug, today: todayStr() }),
   deletePlan: (slug: string) => invoke<void>("delete_plan", { slug }),
   /** The whole library, plans and calendar as one markdown document. */
   exportBundle: () => invoke<string>("export_bundle"),

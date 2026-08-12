@@ -49,6 +49,8 @@ pub fn run() {
             commands::get_plan_source,
             commands::save_plan,
             commands::import_plan,
+            commands::view_plan,
+            commands::delete_plan_day,
             commands::list_day_entries,
             commands::create_plan_from_days,
             commands::sync_plan,

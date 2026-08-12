@@ -4,6 +4,7 @@ import { renderBuilder } from "./screens/builder";
 import { renderRun } from "./screens/run";
 import { renderCalendar } from "./screens/calendar";
 import { renderPlanFrom } from "./screens/planfrom";
+import { renderPlan } from "./screens/plan";
 import { renderView } from "./screens/view";
 import { lastTab, rememberTab } from "./tabs";
 
@@ -28,6 +29,8 @@ async function route() {
   } else if (screen === "library") {
     rememberTab("#/library");
     cleanup = await renderLibrary(app);
+  } else if (screen === "plan" && slug) {
+    cleanup = await renderPlan(app, slug);
   } else if (screen === "planfrom") {
     cleanup = await renderPlanFrom(app);
   } else if (screen === "calendar") {

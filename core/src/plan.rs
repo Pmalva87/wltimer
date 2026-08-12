@@ -40,6 +40,31 @@ pub struct Plan {
     pub days: Vec<PlanDay>,
 }
 
+/// What a sync did to the calendar. `kept` and `done` are the two ways a plan
+/// day can decline to write: something on the calendar outranks it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct SyncReport {
+    /// Days newly put on the calendar.
+    pub scheduled: usize,
+    /// Existing entries rewritten from the plan.
+    pub updated: usize,
+    /// Entries edited on the calendar since this version of the plan, so left
+    /// as they are.
+    pub kept: usize,
+    /// Entries already finished, which a sync never touches.
+    pub done: usize,
+    /// Still-planned entries removed because the plan no longer has that day.
+    pub unscheduled: usize,
+}
+
+impl SyncReport {
+    /// Days the calendar gained or had rewritten — what "synced" has always
+    /// counted, kept as one number for the callers that only report that.
+    pub fn written(&self) -> usize {
+        self.scheduled + self.updated
+    }
+}
+
 /// What an uploaded file did to the plan it was applied to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct PatchCounts {
@@ -197,18 +222,28 @@ pub fn parse_plan(source: &str) -> Result<Plan, Vec<ParseError>> {
 /// appears beside it. Dates before `from` are not passed in and so are never
 /// affected.
 ///
+/// **An entry edited since the plan last changed is left alone.** A sync is a
+/// merge of two documents that both moved, so it picks a winner the way
+/// `bundle::restore` does: the newer `updated` wins, and an absent one reads as
+/// oldest. `plan_updated` is the stamp the plan file itself carries, and it is
+/// also what synced entries are stamped with — not the wall clock — so that
+/// after a sync an entry reads as "this version of the plan" rather than as
+/// something edited afterwards. Upload a fixed plan and its fresh stamp beats
+/// your calendar edit, which is what uploading a fix means; press Sync on an
+/// unchanged plan and your edit stands.
+///
 /// Operates on whole days in memory — holding positions across mutations would
-/// be a shifting-index bug waiting to happen. Returns how many days were
-/// scheduled or updated, and which dates changed.
+/// be a shifting-index bug waiting to happen. Returns what it did and which
+/// dates changed.
 pub fn merge_into_calendar(
     plan: &Plan,
     slug: &str,
     from: &str,
-    now: &str,
+    plan_updated: &str,
     by_date: &mut BTreeMap<String, Vec<DayEntry>>,
-) -> (usize, BTreeSet<String>) {
+) -> (SyncReport, BTreeSet<String>) {
     let mut dirty: BTreeSet<String> = BTreeSet::new();
-    let mut synced = 0;
+    let mut report = SyncReport::default();
     // A stored plan holds no removal markers, so this only matters when a
     // caller merges straight from a file: a day on its way out owns nothing.
     let plan_ids: HashSet<&str> = plan
@@ -233,17 +268,25 @@ pub fn merge_into_calendar(
                 if by_date[&date][i].status == DayStatus::Done {
                     // Already performed. Leave the record alone, and do not
                     // schedule a fresh copy of something that is finished.
+                    report.done += 1;
+                    continue;
+                }
+                if days::entry_updated(&by_date[&date][i])
+                    .is_some_and(|edited| edited.as_str() > plan_updated)
+                {
+                    // Changed here since this version of the plan was written.
+                    report.kept += 1;
                     continue;
                 }
                 let mut entry = by_date.get_mut(&date).unwrap().remove(i);
                 dirty.insert(date);
-                entry.markdown = ids::set_updated(&day.workout_md, now);
+                entry.markdown = ids::set_updated(&day.workout_md, plan_updated);
                 entry.source_plan = Some(slug.to_string());
                 // Re-dated in the plan file? The entry moves and keeps its id
                 // (and so its identity) rather than being destroyed and rebuilt.
                 by_date.entry(day.date.clone()).or_default().push(entry);
                 dirty.insert(day.date.clone());
-                synced += 1;
+                report.updated += 1;
             }
             None => {
                 // Nothing carries this day's id. Before adding, check whether
@@ -269,14 +312,14 @@ pub fn merge_into_calendar(
                     continue;
                 }
                 by_date.entry(day.date.clone()).or_default().push(DayEntry {
-                    markdown: ids::set_updated(&day.workout_md, now),
+                    markdown: ids::set_updated(&day.workout_md, plan_updated),
                     status: DayStatus::Planned,
                     completed_at: None,
                     source_slug: None,
                     source_plan: Some(slug.to_string()),
                 });
                 dirty.insert(day.date.clone());
-                synced += 1;
+                report.scheduled += 1;
             }
         }
     }
@@ -290,11 +333,12 @@ pub fn merge_into_calendar(
                 || days::entry_id(e).is_some_and(|id| plan_ids.contains(id.as_str()))
         });
         if entries.len() != before {
+            report.unscheduled += before - entries.len();
             dirty.insert(date.clone());
         }
     }
 
-    (synced, dirty)
+    (report, dirty)
 }
 
 /// Build a plan document from calendar days: `(date, workout markdown)` in the
@@ -443,6 +487,23 @@ pub fn merge_days_into(stored: &str, patch: &str) -> (String, usize, usize, usiz
         }
     }
     (format!("{preamble}{}", days.concat()), updated, added, removed)
+}
+
+/// Drop one day from a plan document by workout id, leaving every other byte
+/// untouched. `None` when the plan has no such day, so a caller can tell
+/// "removed" from "was never there" — and when it is the plan's only day,
+/// since a plan with no days is not a plan.
+pub fn remove_day(source: &str, day_id: &str) -> Option<String> {
+    let (preamble, days) = sections(source);
+    if days.len() < 2 {
+        return None;
+    }
+    let kept: Vec<String> = days
+        .iter()
+        .filter(|d| section_id(d).as_deref() != Some(day_id))
+        .cloned()
+        .collect();
+    (kept.len() < days.len()).then(|| format!("{preamble}{}", kept.concat()))
 }
 
 /// Give every day section an id, leaving existing ones and every other byte
@@ -1023,6 +1084,29 @@ Brace hard.
     }
 
     #[test]
+    fn remove_day_takes_one_day_and_leaves_the_document_alone() {
+        let s = plan_store("removeday");
+        let (sum, plan) = s.save(PLAN, None, NOW).unwrap();
+        let stored = s.read_source(&sum.slug).unwrap();
+        let doomed = plan.days[0].id.clone().unwrap();
+
+        let after = remove_day(&stored, &doomed).expect("the plan has that day");
+        let reparsed = parse_plan(&after).unwrap();
+        assert_eq!(reparsed.days.len(), 1);
+        assert_eq!(reparsed.days[0].name, "Bench Day");
+        // Title and identity survive — this edits a document, not rebuilds it.
+        assert_eq!(reparsed.name, "531 Cycle 1");
+        assert_eq!(ids::extract_id(&after), ids::extract_id(&stored));
+
+        assert!(remove_day(&stored, &ids::new_id()).is_none(), "not in the plan");
+        let solo = "# Solo\n\n## 2026-07-30: Only\n- id: 33333333-3333-3333-3333-333333333333\n### X\n- work: 30\n";
+        assert!(
+            remove_day(solo, "33333333-3333-3333-3333-333333333333").is_none(),
+            "the last day cannot be removed — that is deleting the plan"
+        );
+    }
+
+    #[test]
     fn a_marker_for_a_day_the_plan_does_not_have_changes_nothing() {
         let s = plan_store("patch-delete-unknown");
         let (sum, _) = s.save(PLAN, None, NOW).unwrap();
@@ -1176,8 +1260,8 @@ Brace hard.
         assert_eq!(all_entries(&cal).len(), 2);
 
         // Re-syncing the same plan must update, never accumulate.
-        let (synced, _) = merge_into_calendar(&plan, "531-cycle-1", "2026-07-01", NOW, &mut cal);
-        assert_eq!(synced, 2);
+        let (report, _) = merge_into_calendar(&plan, "531-cycle-1", "2026-07-01", NOW, &mut cal);
+        assert_eq!(report.written(), 2);
         assert_eq!(all_entries(&cal).len(), 2);
     }
 
@@ -1272,11 +1356,65 @@ Brace hard.
     }
 
     #[test]
+    fn merge_keeps_an_entry_edited_since_the_plan_last_changed() {
+        let (_, plan) = saved_plan("edited");
+        let mut cal = calendar(&plan, "531-cycle-1");
+        // Edited on the calendar after the plan was written.
+        let entry = &mut cal.get_mut("2026-07-30").unwrap()[0];
+        entry.markdown = ids::set_updated(
+            &entry.markdown.replace("Brace hard.", "Belt on, brace hard."),
+            LATER,
+        );
+
+        let (report, _) = merge_into_calendar(&plan, "531-cycle-1", "2026-07-01", NOW, &mut cal);
+
+        // The edited day is kept; the plan's other day syncs as usual.
+        assert_eq!((report.kept, report.updated), (1, 1));
+        assert!(cal["2026-07-30"][0].markdown.contains("Belt on, brace hard."));
+    }
+
+    #[test]
+    fn a_newer_plan_wins_over_a_calendar_edit() {
+        // Uploading a fixed plan is exactly the case where the plan should
+        // win: its stamp is the later one.
+        let (_, plan) = saved_plan("newer-plan");
+        let mut cal = calendar(&plan, "531-cycle-1");
+        let entry = &mut cal.get_mut("2026-07-30").unwrap()[0];
+        entry.markdown = ids::set_updated(&entry.markdown, LATER);
+
+        let later_still = "2026-08-11T09:00:00Z";
+        let (report, _) =
+            merge_into_calendar(&plan, "531-cycle-1", "2026-07-01", later_still, &mut cal);
+
+        assert_eq!((report.updated, report.kept), (2, 0));
+        // And the entry now reads as that version of the plan, not as an edit
+        // made after it — so the next sync does not mistake it for one.
+        assert_eq!(
+            days::entry_updated(&cal["2026-07-30"][0]).as_deref(),
+            Some(later_still)
+        );
+    }
+
+    #[test]
+    fn syncing_twice_changes_nothing_the_second_time() {
+        let (_, plan) = saved_plan("twice");
+        let mut cal = calendar(&plan, "531-cycle-1");
+        let (report, dirty) = merge_into_calendar(&plan, "531-cycle-1", "2026-07-01", NOW, &mut cal);
+        // Entries carry the plan's own stamp, so a repeat sync sees documents
+        // of the same version rather than edits — it rewrites, but nothing
+        // reads as a conflict and nothing accumulates.
+        assert_eq!((report.kept, report.scheduled), (0, 0));
+        assert_eq!(report.updated, 2);
+        assert_eq!(all_entries(&cal).len(), 2);
+        assert!(!dirty.is_empty());
+    }
+
+    #[test]
     fn merge_ignores_dates_before_the_cutoff() {
         let (_, plan) = saved_plan("cutoff");
         let mut cal = BTreeMap::new();
-        let (synced, _) = merge_into_calendar(&plan, "531-cycle-1", "2026-08-01", NOW, &mut cal);
-        assert_eq!(synced, 1);
+        let (report, _) = merge_into_calendar(&plan, "531-cycle-1", "2026-08-01", NOW, &mut cal);
+        assert_eq!(report.written(), 1);
         assert!(!cal.contains_key("2026-07-30"));
     }
 }

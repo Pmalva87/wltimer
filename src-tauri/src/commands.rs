@@ -393,7 +393,19 @@ pub fn promote_day_entry(
 /// Load the upcoming calendar, merge the plan into it (see
 /// `plan::merge_into_calendar` for the matching rules), write back what
 /// changed. Returns the number of days scheduled or updated.
-fn sync_upcoming(state: &AppState, slug: &str, plan: &Plan, from: &str) -> usize {
+/// Push a plan's upcoming days onto the calendar.
+///
+/// `plan_updated` is the stamp the stored plan file carries, and it decides
+/// every conflict: an entry edited later than it is left alone, and entries
+/// written by the sync take that stamp so they read as "this version of the
+/// plan" rather than as edits made after it.
+fn sync_upcoming(
+    state: &AppState,
+    slug: &str,
+    plan: &Plan,
+    plan_updated: &str,
+    from: &str,
+) -> plan::SyncReport {
     let mut by_date: BTreeMap<String, Vec<DayEntry>> = state
         .days
         .dates_from(from)
@@ -404,14 +416,15 @@ fn sync_upcoming(state: &AppState, slug: &str, plan: &Plan, from: &str) -> usize
         })
         .collect();
 
-    let (synced, dirty) = plan::merge_into_calendar(plan, slug, from, &now(), &mut by_date);
+    let (report, dirty) = plan::merge_into_calendar(plan, slug, from, plan_updated, &mut by_date);
 
     for date in dirty {
         let entries = by_date.get(&date).map(Vec::as_slice).unwrap_or(&[]);
         let _ = state.days.save(&date, entries);
     }
-    synced
+    report
 }
+
 
 #[derive(Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
@@ -452,8 +465,11 @@ pub fn save_plan(
     prev_slug: Option<String>,
     today: String,
 ) -> Result<PlanSummary, Vec<ParseError>> {
-    let (summary, plan) = state.plans.save(&source, prev_slug.as_deref(), &now())?;
-    sync_upcoming(&state, &summary.slug, &plan, &date_or_local(&today));
+    let now = now();
+    let (summary, plan) = state.plans.save(&source, prev_slug.as_deref(), &now)?;
+    // The plan was just written with this stamp, so it is the newest version
+    // of every day it holds and wins any conflict on the calendar.
+    sync_upcoming(&state, &summary.slug, &plan, &now, &date_or_local(&today));
     Ok(summary)
 }
 
@@ -465,8 +481,8 @@ pub struct PlanImport {
     /// to match on and so can only be an addition.
     #[serde(flatten)]
     pub counts: PatchCounts,
-    /// Upcoming days the follow-up sync wrote to the calendar.
-    pub synced: usize,
+    /// What the follow-up sync did to the calendar.
+    pub sync: plan::SyncReport,
 }
 
 /// Apply an uploaded plan file to the plan it belongs to, updating only the
@@ -482,9 +498,124 @@ pub fn import_plan(
     source: String,
     today: String,
 ) -> Result<PlanImport, Vec<ParseError>> {
-    let (summary, plan, counts) = state.plans.patch(&source, &now())?;
-    let synced = sync_upcoming(&state, &summary.slug, &plan, &date_or_local(&today));
-    Ok(PlanImport { summary, counts, synced })
+    let now = now();
+    let (summary, plan, counts) = state.plans.patch(&source, &now)?;
+    let sync = sync_upcoming(&state, &summary.slug, &plan, &now, &date_or_local(&today));
+    Ok(PlanImport { summary, counts, sync })
+}
+
+/// A plan's day, together with what became of it on the calendar.
+#[derive(Serialize)]
+pub struct PlanDayView {
+    pub id: Option<String>,
+    pub name: String,
+    /// The date the plan gives it.
+    pub date: String,
+    pub total_secs: u32,
+    /// Where its calendar entry actually sits, when there is one — not always
+    /// `date`: finishing a workout moves it to the day it was done.
+    pub entry_date: Option<String>,
+    pub entry_index: Option<usize>,
+    pub status: Option<DayStatus>,
+    /// The entry was changed after this version of the plan, so the next sync
+    /// will leave it alone.
+    pub edited: bool,
+}
+
+#[derive(Serialize)]
+pub struct PlanView {
+    pub slug: String,
+    pub name: String,
+    pub updated: Option<String>,
+    pub days: Vec<PlanDayView>,
+    /// Set when the stored file no longer parses; `days` is then empty.
+    pub error: Option<String>,
+}
+
+/// A plan and the state of every day it scheduled.
+///
+/// Each day is resolved against the calendar by id, searched from the plan's
+/// first date onward rather than only on the date the plan gives: an entry
+/// moves when it is finished on another day, and a plan that reported those as
+/// missing would be lying about the thing it exists to show.
+#[tauri::command]
+pub fn view_plan(state: State<AppState>, slug: String) -> Result<PlanView, String> {
+    let source = state.plans.read_source(&slug)?;
+    let updated = ids::extract_updated(&source);
+    let plan = match wltimer_core::plan::parse_plan(&source) {
+        Ok(plan) => plan,
+        Err(errors) => {
+            return Ok(PlanView {
+                slug,
+                name: source.lines().next().unwrap_or("").trim_start_matches("# ").into(),
+                updated,
+                days: Vec::new(),
+                error: Some(format!("line {}: {}", errors[0].line, errors[0].message)),
+            })
+        }
+    };
+
+    let first = plan.days.first().map(|d| d.date.clone()).unwrap_or_default();
+    let mut located: BTreeMap<String, (String, usize, DayStatus, Option<String>)> = BTreeMap::new();
+    for date in state.days.dates_from(&first) {
+        for (index, entry) in state.days.load(&date).iter().enumerate() {
+            if let Some(id) = days::entry_id(entry) {
+                located.insert(
+                    id,
+                    (date.clone(), index, entry.status, days::entry_updated(entry)),
+                );
+            }
+        }
+    }
+
+    let days = plan
+        .days
+        .iter()
+        .map(|day| {
+            let found = day.id.as_deref().and_then(|id| located.get(id));
+            PlanDayView {
+                id: day.id.clone(),
+                name: day.name.clone(),
+                date: day.date.clone(),
+                total_secs: parser::parse_workout(&day.workout_md)
+                    .map(|w| w.total_secs())
+                    .unwrap_or(0),
+                entry_date: found.map(|f| f.0.clone()),
+                entry_index: found.map(|f| f.1),
+                status: found.map(|f| f.2),
+                edited: found.is_some_and(|f| match (&f.3, &updated) {
+                    (Some(entry), Some(plan)) => entry > plan,
+                    _ => false,
+                }),
+            }
+        })
+        .collect();
+
+    Ok(PlanView { slug, name: plan.name, updated, days, error: None })
+}
+
+/// Remove one day from a plan, and unschedule it if it is still only planned.
+///
+/// The on-phone counterpart to uploading a `- deleted: true` section: same
+/// effect, without a round trip through a file.
+#[tauri::command]
+pub fn delete_plan_day(
+    state: State<AppState>,
+    slug: String,
+    day_id: String,
+    today: String,
+) -> Result<plan::SyncReport, String> {
+    let source = state.plans.read_source(&slug)?;
+    let merged = plan::remove_day(&source, &day_id).ok_or(
+        "cannot remove that day — either it is not in this plan, or it is the \
+         only one left and what you want is to delete the plan",
+    )?;
+    let now = now();
+    let (summary, plan) = state
+        .plans
+        .save(&merged, Some(&slug), &now)
+        .map_err(|e| format!("line {}: {}", e[0].line, e[0].message))?;
+    Ok(sync_upcoming(&state, &summary.slug, &plan, &now, &date_or_local(&today)))
 }
 
 /// One calendar entry offered for picking when building a plan from history.
@@ -568,14 +699,22 @@ pub fn create_plan_from_days(
     Ok(summary)
 }
 
-/// Re-apply a stored plan's upcoming days to the calendar; returns how many
-/// days were scheduled.
+/// Re-apply a stored plan's upcoming days to the calendar.
+///
+/// Unlike a save, this carries no new version of anything: the comparison uses
+/// the stamp the stored plan already has, so pressing Sync cannot overwrite a
+/// day you edited on the calendar afterwards.
 #[tauri::command]
-pub fn sync_plan(state: State<AppState>, slug: String, today: String) -> Result<usize, String> {
+pub fn sync_plan(
+    state: State<AppState>,
+    slug: String,
+    today: String,
+) -> Result<plan::SyncReport, String> {
     let source = state.plans.read_source(&slug)?;
     let plan = wltimer_core::plan::parse_plan(&source)
         .map_err(|e| format!("plan no longer parses — line {}: {}", e[0].line, e[0].message))?;
-    Ok(sync_upcoming(&state, &slug, &plan, &date_or_local(&today)))
+    let updated = ids::extract_updated(&source).unwrap_or_default();
+    Ok(sync_upcoming(&state, &slug, &plan, &updated, &date_or_local(&today)))
 }
 
 #[tauri::command]
