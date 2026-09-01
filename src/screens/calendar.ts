@@ -83,12 +83,20 @@ export async function renderCalendar(root: HTMLElement, dateArg: string | null) 
   }
 
   async function render() {
-    const [summaries, plans] = await Promise.all([
+    const prevMonth = viewMonth === 1 ? 12 : viewMonth - 1;
+    const prevYear = viewMonth === 1 ? viewYear - 1 : viewYear;
+    const nextMonth = viewMonth === 12 ? 1 : viewMonth + 1;
+    const nextYear = viewMonth === 12 ? viewYear + 1 : viewYear;
+    const [summaries, prevSummaries, nextSummaries, plans] = await Promise.all([
       api.getMonth(viewYear, viewMonth),
+      api.getMonth(prevYear, prevMonth),
+      api.getMonth(nextYear, nextMonth),
       api.listPlans(),
     ]);
     planNames = new Map(plans.map((p) => [p.slug, p.name]));
-    const byDate = new Map(summaries.map((s) => [s.date, s.entries]));
+    const byDate = new Map(
+      [...prevSummaries, ...summaries, ...nextSummaries].map((s) => [s.date, s.entries]),
+    );
     const entries: DayEntryInfo[] = await api.getDay(selected).catch(() => []);
     // One parse per entry, read for both its duration and its warnings.
     const previews = await Promise.all(entries.map((e) => api.parsePreview(e.markdown)));
@@ -102,23 +110,36 @@ export async function renderCalendar(root: HTMLElement, dateArg: string | null) 
 
     const firstWeekday = (new Date(viewYear, viewMonth - 1, 1).getDay() + 6) % 7;
     const daysInMonth = new Date(viewYear, viewMonth, 0).getDate();
-    let cells = "";
-    for (let i = 0; i < firstWeekday; i++) {
-      cells += `<div class="cal-cell blank"></div>`;
-    }
-    for (let d = 1; d <= daysInMonth; d++) {
-      const date = `${viewYear}-${pad(viewMonth)}-${pad(d)}`;
+    const daysInPrevMonth = new Date(prevYear, prevMonth, 0).getDate();
+    // Fill out to whole weeks so neighbouring-month days appear instead of
+    // blank cells, dimmed rather than opaque so the current month still reads
+    // at a glance.
+    const trailingCount = (7 - ((firstWeekday + daysInMonth) % 7)) % 7;
+
+    function dayCell(date: string, d: number, otherMonth: boolean): string {
       const dayEntries = byDate.get(date) ?? [];
       // One icon per status present: 🏋 = worked out, 📋 = planned.
       const icons =
         (dayEntries.some((e) => e.status === "done") ? `<span class="cal-ico">🏋</span>` : "") +
         (dayEntries.some((e) => e.status === "planned") ? `<span class="cal-ico">📋</span>` : "");
-      cells += `
-        <button class="cal-cell day ${date === today ? "today" : ""} ${date === selected ? "selected" : ""}"
+      return `
+        <button class="cal-cell day ${otherMonth ? "other-month" : ""} ${date === today ? "today" : ""} ${date === selected ? "selected" : ""}"
                 data-date="${date}">
           <span class="num">${d}</span>
           <span class="dots">${icons}</span>
         </button>`;
+    }
+
+    let cells = "";
+    for (let i = 0; i < firstWeekday; i++) {
+      const d = daysInPrevMonth - firstWeekday + 1 + i;
+      cells += dayCell(`${prevYear}-${pad(prevMonth)}-${pad(d)}`, d, true);
+    }
+    for (let d = 1; d <= daysInMonth; d++) {
+      cells += dayCell(`${viewYear}-${pad(viewMonth)}-${pad(d)}`, d, false);
+    }
+    for (let d = 1; d <= trailingCount; d++) {
+      cells += dayCell(`${nextYear}-${pad(nextMonth)}-${pad(d)}`, d, true);
     }
 
     const selDate = new Date(`${selected}T12:00:00`);

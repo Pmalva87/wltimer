@@ -554,9 +554,16 @@ details.notes textarea {
   cursor: pointer;
 }
 
-.cal-cell.blank {
-  background: transparent;
-  cursor: default;
+.cal-cell.other-month {
+  opacity: 0.45;
+}
+
+.cal-cell.other-month.today {
+  opacity: 0.7;
+}
+
+.cal-cell.other-month.selected {
+  opacity: 1;
 }
 
 .cal-cell.today {
