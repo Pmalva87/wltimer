@@ -1,5 +1,6 @@
 import {
   api,
+  effectiveRegistered,
   fmtKg,
   newCompetition,
   todayStr,
@@ -44,6 +45,11 @@ export async function renderCompEdit(root: HTMLElement, slug: string | null) {
     }
   }
 
+  // Attempts start folded away on a meet that has none yet — nothing to show
+  // before the bar is loaded, and a future meet is exactly the case this
+  // screen is for. A meet that already has data keeps it in view.
+  let showAttempts = hasLiftData(c.snatch) || hasLiftData(c.clean_jerk);
+
   const backHash = slug ? `#/comp/${encodeURIComponent(slug)}` : "#/library";
 
   function render() {
@@ -79,10 +85,29 @@ export async function renderCompEdit(root: HTMLElement, slug: string | null) {
                 c.bodyweight ?? ""
               }" placeholder="88.4">`,
             )}
+            ${field(
+              "Registered",
+              `<label class="comp-checkbox">
+                 <input type="checkbox" id="registered" ${effectiveRegistered(c) ? "checked" : ""}>
+                 ${effectiveRegistered(c) ? "Signed up for this meet" : "Not signed up yet"}
+               </label>`,
+              c.qualification && c.qualification.standards.length
+                ? "Unchecked by default while there is a mark to hit — check it once you have actually entered."
+                : "Checked by default — nothing here is gating entry.",
+            )}
           </section>
 
-          ${liftSection("Snatch", "snatch", c.snatch)}
-          ${liftSection("Clean & Jerk", "clean_jerk", c.clean_jerk)}
+          <div class="section-head">
+            <h2>Attempts</h2>
+            <div class="section-actions">
+              <button class="btn" id="toggleattempts">${showAttempts ? "Hide" : "+ Add attempts"}</button>
+            </div>
+          </div>
+          ${
+            showAttempts
+              ? liftSection("Snatch", "snatch", c.snatch) + liftSection("Clean & Jerk", "clean_jerk", c.clean_jerk)
+              : `<div class="empty small">Nothing declared yet — add attempts once you know what you are opening with.</div>`
+          }
 
           <div class="section-head">
             <h2>Entry standard</h2>
@@ -183,6 +208,16 @@ export async function renderCompEdit(root: HTMLElement, slug: string | null) {
     on("bodyweight", "input", (el) => {
       const n = Number(el.value);
       c.bodyweight = el.value.trim() === "" || Number.isNaN(n) ? null : n;
+    });
+    // Touching the box always writes an explicit answer — there is no way
+    // back to "let the app decide" from here, matching the checkbox itself
+    // only ever being checked or not.
+    root.querySelector<HTMLInputElement>("#registered")?.addEventListener("change", (ev) => {
+      c.registered_override = (ev.currentTarget as HTMLInputElement).checked;
+    });
+    root.querySelector("#toggleattempts")?.addEventListener("click", () => {
+      showAttempts = !showAttempts;
+      render();
     });
 
     // --- attempts ---
@@ -355,6 +390,11 @@ export async function renderCompEdit(root: HTMLElement, slug: string | null) {
   }
 
   render();
+}
+
+/** Is there anything on this lift worth showing? */
+function hasLiftData(entry: LiftEntry): boolean {
+  return entry.attempts.some((a) => a !== null) || entry.warmup.length > 0;
 }
 
 function blankStandard(c: Competition): Standard {

@@ -1369,6 +1369,21 @@ a.ov-note {
   color: #cbd5e1;
 }
 
+.comp-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.8rem;
+  background: var(--panel);
+  border-radius: 0.6rem;
+  font-size: 0.95rem;
+}
+.comp-checkbox input {
+  width: 1.3rem;
+  height: 1.3rem;
+  flex: none;
+}
+
 .comp-fields {
   display: flex;
   flex-direction: column;

@@ -237,6 +237,12 @@ pub struct Competition {
     /// What it takes to get into this meet, if it is one you are chasing.
     #[serde(default)]
     pub qualification: Option<Qualification>,
+    /// Whether you have actually signed up, when the document says so
+    /// explicitly. `None` defers to [`Competition::registered`], which is
+    /// almost always the answer worth showing: this field exists for the
+    /// meets where that default is wrong, not as the normal way to record it.
+    #[serde(default)]
+    pub registered_override: Option<bool>,
     pub snatch: LiftEntry,
     pub clean_jerk: LiftEntry,
 }
@@ -254,6 +260,7 @@ impl Competition {
             age_group: None,
             targets: Vec::new(),
             qualification: None,
+            registered_override: None,
             snatch: LiftEntry::default(),
             clean_jerk: LiftEntry::default(),
         }
@@ -411,6 +418,18 @@ impl Competition {
             (Some(s), Some(c)) => TotalState::Made { total: s + c },
             _ => TotalState::Open,
         }
+    }
+
+    /// Whether you count as registered for this meet.
+    ///
+    /// Explicit whenever the document says so. Otherwise: a meet with no
+    /// entry standard has nothing gating it, so there is nothing to confirm —
+    /// registering is assumed until you say otherwise. A meet with a
+    /// standard is not assumed, since getting in is not certain until the
+    /// mark is met, so it reads as not-yet-registered until you confirm it.
+    pub fn registered(&self) -> bool {
+        self.registered_override
+            .unwrap_or_else(|| self.qualification.as_ref().is_none_or(|q| q.standards.is_empty()))
     }
 
     /// The total if every attempt already declared is made.
@@ -703,6 +722,19 @@ fn parse_kg(val: &str) -> Option<f64> {
     (kg.is_finite() && kg > 0.0 && kg < 1000.0).then_some(kg)
 }
 
+fn parse_bool(word: &str) -> Option<bool> {
+    let norm: String = word
+        .to_lowercase()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect();
+    match norm.as_str() {
+        "yes" | "y" | "true" | "registered" => Some(true),
+        "no" | "n" | "false" | "notregistered" => Some(false),
+        _ => None,
+    }
+}
+
 fn parse_result(word: &str) -> Option<AttemptResult> {
     let norm: String = word
         .to_lowercase()
@@ -847,6 +879,9 @@ pub fn competition_to_markdown(c: &Competition) -> String {
     }
     for t in &c.targets {
         out.push_str(&format!("- target: {}\n", mark_line(t.total, &t.label)));
+    }
+    if let Some(r) = c.registered_override {
+        out.push_str(&format!("- registered: {}\n", if r { "yes" } else { "no" }));
     }
     if let Some(q) = &c.qualification {
         out.push_str(&format!("\n## {QUALIFICATION}\n"));
@@ -1279,6 +1314,16 @@ fn preamble(c: &mut Competition, key: &str, val: &str, line: usize, errors: &mut
                 format!("invalid target '{val}' — write the total first, e.g. '230 today'"),
             )),
         },
+        "registered" => {
+            if c.registered_override.is_some() {
+                dup("registered", errors);
+            } else {
+                match parse_bool(val) {
+                    Some(b) => c.registered_override = Some(b),
+                    None => errors.push(err(line, format!("invalid 'registered' value '{val}' — write 'yes' or 'no'"))),
+                }
+            }
+        }
         // `kind` is the routing marker, `updated` is written by the store;
         // anything else in the preamble is someone's own note.
         _ => {}
@@ -1417,6 +1462,34 @@ Openers felt fast.
         let errs =
             parse_competition("# M\n- organizer: BWL\n- organizer: IWF\n").unwrap_err();
         assert!(errs[0].message.contains("duplicate 'organizer'"));
+    }
+
+    #[test]
+    fn registered_defaults_to_yes_without_an_entry_standard() {
+        let c = parse_competition("# Club Open\n").unwrap();
+        assert!(c.registered());
+    }
+
+    #[test]
+    fn registered_defaults_to_no_with_an_entry_standard() {
+        let c = parse_competition("# Europeans\n\n## Qualification\n- needs: 250\n").unwrap();
+        assert!(!c.registered());
+    }
+
+    #[test]
+    fn an_explicit_registered_wins_either_way() {
+        let yes = parse_competition("# Europeans\n- registered: yes\n\n## Qualification\n- needs: 250\n").unwrap();
+        assert!(yes.registered());
+        let no = parse_competition("# Club Open\n- registered: no\n").unwrap();
+        assert!(!no.registered());
+    }
+
+    #[test]
+    fn registered_round_trips() {
+        let c = parse_competition("# M\n- registered: no\n").unwrap();
+        let md = competition_to_markdown(&c);
+        assert!(md.contains("- registered: no"));
+        assert_eq!(parse_competition(&md).unwrap(), c);
     }
 
     #[test]

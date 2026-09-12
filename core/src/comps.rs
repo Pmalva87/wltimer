@@ -28,6 +28,7 @@ pub struct CompSummary {
     pub organizer: Option<String>,
     pub category: Option<String>,
     pub age_group: Option<String>,
+    pub registered: bool,
     pub total: TotalState,
     /// How many attempts have been taken, across both lifts. Zero on a meet
     /// you have only entered, which is what separates the two kinds of row a
@@ -97,9 +98,12 @@ impl CompStore {
             .map(|(slug, _)| slug)
     }
 
-    /// Newest first. A meet with no date sorts last rather than first: it is
-    /// one you have not pinned down, not one that happened at the dawn of
-    /// time, and an undated row at the top of the list would read as next up.
+    /// Chronological, earliest date first — the most recent line in the story
+    /// leads, and the more distant a date the lower it sits, whether that
+    /// distance runs into the past or the future. A meet with no date sorts
+    /// last rather than first: it is one you have not pinned down, not one
+    /// that happened at the dawn of time, and an undated row at the top of
+    /// the list would read as next up.
     pub fn list(&self) -> Vec<CompSummary> {
         let mut out: Vec<CompSummary> = self
             .stored()
@@ -113,6 +117,7 @@ impl CompStore {
                     organizer: c.organizer.clone(),
                     category: c.category.clone(),
                     age_group: c.age_group.clone(),
+                    registered: c.registered(),
                     total: c.total(),
                     attempts_taken: c.snatch.taken() + c.clean_jerk.taken(),
                     standards: c.qualification.as_ref().map_or(0, |q| q.standards.len()),
@@ -126,6 +131,7 @@ impl CompStore {
                     organizer: None,
                     category: None,
                     age_group: None,
+                    registered: true,
                     total: TotalState::Open,
                     attempts_taken: 0,
                     standards: 0,
@@ -134,7 +140,7 @@ impl CompStore {
             })
             .collect();
         out.sort_by(|a, b| match (&a.date, &b.date) {
-            (Some(x), Some(y)) => y.cmp(x),
+            (Some(x), Some(y)) => x.cmp(y),
             (Some(_), None) => std::cmp::Ordering::Less,
             (None, Some(_)) => std::cmp::Ordering::Greater,
             (None, None) => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
@@ -278,13 +284,13 @@ mod tests {
     }
 
     #[test]
-    fn meets_are_listed_newest_first_with_undated_ones_last() {
-        let s = temp_store("meets_are_listed_newest_first_with_undated_ones_last");
+    fn meets_are_listed_earliest_date_first_with_undated_ones_last() {
+        let s = temp_store("meets_are_listed_earliest_date_first_with_undated_ones_last");
         s.save("# Undated\n- kind: competition\n", None, NOW).unwrap();
         s.save("# Old\n- kind: competition\n- date: 2025-01-01\n", None, NOW).unwrap();
         s.save("# Next\n- kind: competition\n- date: 2027-01-01\n", None, NOW).unwrap();
         let names: Vec<String> = s.list().into_iter().map(|c| c.name).collect();
-        assert_eq!(names, vec!["Next", "Old", "Undated"]);
+        assert_eq!(names, vec!["Old", "Next", "Undated"]);
     }
 
     #[test]
@@ -303,9 +309,10 @@ mod tests {
         )
         .unwrap();
         let list = s.list();
-        assert_eq!(list[0].standards, 1);
-        assert_eq!(list[0].attempts_taken, 0);
-        assert_eq!(list[1].standards, 0);
-        assert_eq!(list[1].attempts_taken, 1);
+        // Club Open (2026-02-01) sorts before Europeans 2027 (2027-04-10).
+        assert_eq!(list[0].standards, 0);
+        assert_eq!(list[0].attempts_taken, 1);
+        assert_eq!(list[1].standards, 1);
+        assert_eq!(list[1].attempts_taken, 0);
     }
 }

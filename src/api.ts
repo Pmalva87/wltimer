@@ -220,6 +220,8 @@ export interface Competition {
   age_group: string | null;
   targets: Target[];
   qualification: Qualification | null;
+  /** Set only when it overrides the computed default — see `effectiveRegistered`. */
+  registered_override: boolean | null;
   snatch: LiftEntry;
   clean_jerk: LiftEntry;
 }
@@ -243,6 +245,7 @@ export interface CompSummary {
   organizer: string | null;
   category: string | null;
   age_group: string | null;
+  registered: boolean;
   total: TotalState;
   attempts_taken: number;
   standards: number;
@@ -281,6 +284,7 @@ export interface TargetView {
 export interface CompView {
   slug: string;
   competition: Competition;
+  registered: boolean;
   total: TotalState;
   best_possible_total: number | null;
   snatch_best: number | null;
@@ -312,9 +316,16 @@ export function newCompetition(name: string, date: string | null): Competition {
     age_group: null,
     targets: [],
     qualification: null,
+    registered_override: null,
     snatch: lift(),
     clean_jerk: lift(),
   };
+}
+
+/** Mirrors `Competition::registered` — the editor has no server round trip to
+ *  ask for the computed value, so it works it out the same way here. */
+export function effectiveRegistered(c: Competition): boolean {
+  return c.registered_override ?? (!c.qualification || c.qualification.standards.length === 0);
 }
 
 /** `95`, `42.5` — weights are written the way they are read. */

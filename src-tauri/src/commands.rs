@@ -1150,6 +1150,7 @@ pub struct TargetView {
 pub struct CompView {
     pub slug: String,
     pub competition: Competition,
+    pub registered: bool,
     pub total: comp::TotalState,
     pub best_possible_total: Option<f64>,
     pub snatch_best: Option<f64>,
@@ -1280,6 +1281,7 @@ pub fn view_competition(state: State<AppState>, slug: String) -> Result<CompView
 
     Ok(CompView {
         slug,
+        registered: c.registered(),
         total: c.total(),
         best_possible_total: c.best_possible_total(),
         snatch_best: c.snatch.best(),

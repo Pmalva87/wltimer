@@ -1,5 +1,6 @@
-import { api, fmtDuration, todayStr, type DayEntryInfo, type ParseError } from "../api";
+import { api, fmtDuration, todayStr, type CompSummary, type DayEntryInfo, type ParseError } from "../api";
 import { copyText } from "../clipboard";
+import { compRow } from "./comp";
 import { tabBar } from "../tabs";
 import { esc, noRestChip } from "./library";
 
@@ -87,16 +88,28 @@ export async function renderCalendar(root: HTMLElement, dateArg: string | null) 
     const prevYear = viewMonth === 1 ? viewYear - 1 : viewYear;
     const nextMonth = viewMonth === 12 ? 1 : viewMonth + 1;
     const nextYear = viewMonth === 12 ? viewYear + 1 : viewYear;
-    const [summaries, prevSummaries, nextSummaries, plans] = await Promise.all([
+    const [summaries, prevSummaries, nextSummaries, plans, comps] = await Promise.all([
       api.getMonth(viewYear, viewMonth),
       api.getMonth(prevYear, prevMonth),
       api.getMonth(nextYear, nextMonth),
       api.listPlans(),
+      api.listCompetitions(),
     ]);
     planNames = new Map(plans.map((p) => [p.slug, p.name]));
     const byDate = new Map(
       [...prevSummaries, ...summaries, ...nextSummaries].map((s) => [s.date, s.entries]),
     );
+    // Meets are their own document kind, not calendar entries — a date here
+    // is just `CompSummary.date` read back, grouped for the grid and the
+    // day panel rather than folded into `byDate`.
+    const compsByDate = new Map<string, CompSummary[]>();
+    for (const c of comps) {
+      if (!c.date) continue;
+      const list = compsByDate.get(c.date);
+      if (list) list.push(c);
+      else compsByDate.set(c.date, [c]);
+    }
+    const dayComps = compsByDate.get(selected) ?? [];
     const entries: DayEntryInfo[] = await api.getDay(selected).catch(() => []);
     // One parse per entry, read for both its duration and its warnings.
     const previews = await Promise.all(entries.map((e) => api.parsePreview(e.markdown)));
@@ -121,7 +134,8 @@ export async function renderCalendar(root: HTMLElement, dateArg: string | null) 
       // One icon per status present: 🏋 = worked out, 📋 = planned.
       const icons =
         (dayEntries.some((e) => e.status === "done") ? `<span class="cal-ico">🏋</span>` : "") +
-        (dayEntries.some((e) => e.status === "planned") ? `<span class="cal-ico">📋</span>` : "");
+        (dayEntries.some((e) => e.status === "planned") ? `<span class="cal-ico">📋</span>` : "") +
+        (compsByDate.has(date) ? `<span class="cal-ico">🏆</span>` : "");
       return `
         <button class="cal-cell day ${otherMonth ? "other-month" : ""} ${date === today ? "today" : ""} ${date === selected ? "selected" : ""}"
                 data-date="${date}">
@@ -160,10 +174,17 @@ export async function renderCalendar(root: HTMLElement, dateArg: string | null) 
             <h2>${selLabel}</h2>
             <button class="btn" id="gotoday">Today</button>
           </div>
+          ${
+            dayComps.length
+              ? `<div class="day-total">🏆 ${dayComps.length === 1 ? "Meet" : "Meets"} today</div>${dayComps.map(compRow).join("")}`
+              : ""
+          }
           ${plannedCount > 1 ? `<div class="day-total">Planned total: ${fmtDuration(plannedTotal)}</div>` : ""}
           ${
             entries.length === 0
-              ? `<div class="empty small">Nothing on this day.</div>`
+              ? dayComps.length
+                ? ""
+                : `<div class="empty small">Nothing on this day.</div>`
               : entries.map((e, i) => entryCard(e, i, entryTotals[i], entryNoRest[i])).join("")
           }
           <div id="daystatus" class="editor-status"></div>

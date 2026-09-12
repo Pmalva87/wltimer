@@ -39,6 +39,9 @@ export function compRow(c: CompSummary): string {
   if (c.standards > 0) {
     bits.push(`🎯 ${c.standards} mark${c.standards === 1 ? "" : "s"} to get in`);
   }
+  if (!c.registered) {
+    bits.push(`<span class="meta-warn">⚠ not registered</span>`);
+  }
   return `<div class="workout">
             <a class="info tappable" href="#/comp/${encodeURIComponent(c.slug)}">
               <span class="name">🏆 ${esc(c.name)}</span>
@@ -81,6 +84,7 @@ export async function renderComp(root: HTMLElement, slug: string) {
     c.category ? esc(c.category) : null,
     c.age_group ? esc(c.age_group) : null,
     c.bodyweight != null ? `${fmtKg(c.bodyweight)} kg bw` : null,
+    view.registered ? null : `<span class="meta-warn">⚠ not registered</span>`,
   ].filter(Boolean);
 
   root.innerHTML = `
@@ -93,8 +97,8 @@ export async function renderComp(root: HTMLElement, slug: string) {
         <h1 class="view-title">🏆 ${esc(c.name)}</h1>
         ${meta.length ? `<div class="comp-meta">${meta.map((m) => `<span>${m}</span>`).join("")}</div>` : ""}
         ${totalPanel(view)}
-        ${liftCard("Snatch", c.snatch, view.snatch_best, view.snatch_going_down, view.snatch_notes_html)}
-        ${liftCard("Clean & Jerk", c.clean_jerk, view.clean_jerk_best, view.clean_jerk_going_down, view.clean_jerk_notes_html)}
+        ${hasData(c.snatch) ? liftCard("Snatch", c.snatch, view.snatch_best, view.snatch_going_down, view.snatch_notes_html) : ""}
+        ${hasData(c.clean_jerk) ? liftCard("Clean & Jerk", c.clean_jerk, view.clean_jerk_best, view.clean_jerk_going_down, view.clean_jerk_notes_html) : ""}
         ${
           view.targets.length
             ? `<section class="view-part">
@@ -109,6 +113,11 @@ export async function renderComp(root: HTMLElement, slug: string) {
         ${standardsSection(view.standards, c.age_group, c.category)}
       </div>
     </div>`;
+}
+
+/** Is there anything on this lift worth a card — an attempt, or a warmup? */
+function hasData(entry: LiftEntry): boolean {
+  return entry.attempts.some((a) => a !== null) || entry.warmup.length > 0;
 }
 
 function totalPanel(view: CompView): string {
