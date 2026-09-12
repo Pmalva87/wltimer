@@ -82,11 +82,12 @@ export interface ImportReport {
   workouts: Counts;
   plans: Counts;
   days: Counts;
+  competitions: Counts;
   failed: number;
 }
 
 export type BundlePreview =
-  | { status: "ok"; workouts: number; plans: number; days: number }
+  | { status: "ok"; workouts: number; plans: number; days: number; competitions: number }
   | { status: "not_bundle" }
   | { status: "err"; errors: ParseError[] };
 
@@ -158,6 +159,163 @@ export interface SyncReport {
   kept: number;
   done: number;
   unscheduled: number;
+}
+
+// ---- competitions ----
+
+export type AttemptResult = "declared" | "good" | "miss";
+export type Lift = "snatch" | "clean_jerk";
+
+export interface Attempt {
+  kg: number;
+  result: AttemptResult;
+}
+
+export interface WarmupSet {
+  kg: number;
+  reps: number;
+  done: boolean;
+}
+
+export interface LiftEntry {
+  /** Exactly three slots; null is an attempt not declared yet. */
+  attempts: (Attempt | null)[];
+  warmup: WarmupSet[];
+  notes_md: string;
+}
+
+/** A total to chase today — not a qualifying mark, which is a Standard. */
+export interface Target {
+  total: number;
+  label: string;
+}
+
+/** One row of a qualifying table: how much, for whom. */
+export interface Standard {
+  total: number;
+  label: string;
+  age_group: string | null;
+  category: string | null;
+}
+
+/** What it takes to get into the meet this hangs off. */
+export interface Qualification {
+  from: string | null;
+  to: string | null;
+  /** Sanctioning bodies whose meets count. Empty means any meet counts. */
+  counts: string[];
+  standards: Standard[];
+}
+
+export interface Competition {
+  id: string | null;
+  name: string;
+  date: string | null;
+  bodyweight: number | null;
+  category: string | null;
+  /** A meet can answer to more than one body; eligibility is an overlap. */
+  orgs: string[];
+  age_group: string | null;
+  targets: Target[];
+  qualification: Qualification | null;
+  snatch: LiftEntry;
+  clean_jerk: LiftEntry;
+}
+
+export type TotalState =
+  | { state: "made"; total: number }
+  | { state: "open" }
+  | { state: "bombed_out" };
+
+export type TargetStatus =
+  | { state: "clinched" }
+  | { state: "needs"; lift: Lift; attempt: number; kg: number }
+  | { state: "open" }
+  | { state: "out_of_reach" };
+
+export interface CompSummary {
+  slug: string;
+  name: string;
+  date: string | null;
+  orgs: string[];
+  category: string | null;
+  age_group: string | null;
+  total: TotalState;
+  attempts_taken: number;
+  standards: number;
+  error: string | null;
+}
+
+export interface StandardView {
+  total: number;
+  label: string;
+  age_group: string | null;
+  category: string | null;
+  met_by: string | null;
+  met_on: string | null;
+  met_total: number | null;
+  /** The class that total was set in — shown rather than judged. */
+  met_category: string | null;
+  yours: boolean;
+}
+
+export interface MarkView {
+  slug: string;
+  meet: string;
+  total: number;
+  label: string;
+  age_group: string | null;
+  category: string | null;
+  status: TargetStatus;
+}
+
+export interface TargetView {
+  total: number;
+  label: string;
+  status: TargetStatus;
+}
+
+export interface CompView {
+  slug: string;
+  competition: Competition;
+  total: TotalState;
+  best_possible_total: number | null;
+  snatch_best: number | null;
+  clean_jerk_best: number | null;
+  snatch_going_down: number[];
+  clean_jerk_going_down: number[];
+  snatch_notes_html: string;
+  clean_jerk_notes_html: string;
+  targets: TargetView[];
+  standards: StandardView[];
+  marks: MarkView[];
+}
+
+export type CompParse =
+  | { status: "ok"; competition: Competition }
+  | { status: "err"; errors: ParseError[] };
+
+/** An empty meet, as the editor starts one. Mirrors `Competition::new`. */
+export function newCompetition(name: string, date: string | null): Competition {
+  const lift = (): LiftEntry => ({ attempts: [null, null, null], warmup: [], notes_md: "" });
+  return {
+    id: null,
+    name,
+    date,
+    bodyweight: null,
+    category: null,
+    orgs: [],
+    age_group: null,
+    targets: [],
+    qualification: null,
+    snatch: lift(),
+    clean_jerk: lift(),
+  };
+}
+
+/** `95`, `42.5` — weights are written the way they are read. */
+export function fmtKg(kg: number): string {
+  return Number.isInteger(kg) ? String(kg) : String(Math.round(kg * 100) / 100);
 }
 
 export interface DaySummary {
@@ -317,6 +475,19 @@ export const api = {
   syncPlan: (slug: string) =>
     invoke<SyncReport>("sync_plan", { slug, today: todayStr() }),
   deletePlan: (slug: string) => invoke<void>("delete_plan", { slug }),
+  listCompetitions: () => invoke<CompSummary[]>("list_competitions"),
+  getCompetitionSource: (slug: string) =>
+    invoke<string>("get_competition_source", { slug }),
+  isCompetition: (source: string) => invoke<boolean>("is_competition", { source }),
+  parseCompetition: (source: string) =>
+    invoke<CompParse>("parse_competition_full", { source }),
+  /** The document format has one writer, in Rust — the editor sends the meet. */
+  serializeCompetition: (competition: Competition) =>
+    invoke<string>("serialize_competition", { competition }),
+  saveCompetition: (source: string, prevSlug: string | null) =>
+    invoke<CompSummary>("save_competition", { source, prevSlug }),
+  deleteCompetition: (slug: string) => invoke<void>("delete_competition", { slug }),
+  viewCompetition: (slug: string) => invoke<CompView>("view_competition", { slug }),
   /** The whole library, plans and calendar as one markdown document. */
   exportBundle: () => invoke<string>("export_bundle"),
   parseBundlePreview: (source: string) =>

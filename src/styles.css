@@ -1220,3 +1220,212 @@ a.ov-note {
   padding: 0.3rem 0.5rem;
   font-size: 0.78rem;
 }
+
+/* ---- competitions ---- */
+
+.comp-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+  margin: 0.25rem 0 0.75rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.comp-total {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.9rem;
+  margin-bottom: 0.75rem;
+  border-radius: 12px;
+  background: var(--panel);
+}
+.comp-total-label {
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.comp-total-value {
+  font-size: 2.6rem;
+  font-weight: 700;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+.comp-total.bombed_out .comp-total-value {
+  font-size: 1.6rem;
+  color: #f87171;
+}
+.comp-total-note {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.comp-attempts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.comp-attempt {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 8px;
+  background: #00000030;
+}
+.comp-attempt.empty {
+  opacity: 0.45;
+}
+.comp-attempt-n {
+  width: 1.4rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.comp-attempt-kg {
+  font-size: 1.25rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  min-width: 3.2rem;
+}
+.comp-result {
+  font-size: 0.85rem;
+}
+.comp-result.good {
+  color: #4ade80;
+}
+.comp-result.miss {
+  color: #f87171;
+}
+.comp-result.declared {
+  color: var(--muted);
+}
+
+.comp-warmup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-bottom: 0.5rem;
+}
+.comp-set {
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: #00000030;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+.comp-set.done {
+  color: #4ade80;
+}
+
+.comp-mark {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.6rem;
+  padding: 0.4rem 0.5rem;
+  border-radius: 8px;
+  background: #00000030;
+  margin-bottom: 0.3rem;
+}
+.comp-mark-total {
+  font-size: 1.15rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  min-width: 3rem;
+}
+.comp-mark-label {
+  flex: 1 1 8rem;
+  font-size: 0.9rem;
+}
+.comp-mark-state {
+  font-size: 0.85rem;
+  width: 100%;
+}
+.comp-mark-state.clinched {
+  color: #4ade80;
+}
+.comp-mark-state.needs {
+  color: #fbbf24;
+}
+.comp-mark-state.out {
+  color: #f87171;
+}
+.comp-mark-state.open {
+  color: var(--muted);
+}
+.comp-mark.other {
+  opacity: 0.6;
+}
+.comp-yours {
+  font-size: 0.7rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 999px;
+  background: #33415588;
+  color: #cbd5e1;
+}
+
+.comp-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-bottom: 0.75rem;
+}
+.comp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.comp-hint {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.comp-marks-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.comp-edit-attempts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+}
+.comp-edit-attempt,
+.comp-edit-set,
+.comp-edit-mark {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.3rem;
+}
+.comp-edit-attempt .text-input,
+.comp-edit-set .text-input,
+.comp-edit-mark .text-input {
+  flex: 1 1 3rem;
+  min-width: 0;
+}
+.comp-result-btn {
+  flex: 0 0 auto;
+  min-width: 6rem;
+}
+.comp-result-btn.good {
+  color: #4ade80;
+}
+.comp-result-btn.miss {
+  color: #f87171;
+}
+.comp-tick.done {
+  color: #4ade80;
+}
+.comp-x {
+  color: var(--muted);
+}
+.comp-danger {
+  margin: 1.5rem 0 0.5rem;
+}

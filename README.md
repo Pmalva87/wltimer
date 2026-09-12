@@ -133,6 +133,99 @@ Anything with no evidence at all is left unstamped rather than given a guessed
 date — an absent stamp reads as "oldest", so it loses a comparison instead of
 winning one it has not earned.
 
+## Competitions
+
+A competition is not a workout — there is no clock the app owns — so it is a
+document of its own, reached from **Workouts → Competitions**. It holds the
+three attempts of each lift, the warmup you tick off on the way to the
+platform, and what the meet totals.
+
+```markdown
+# Nationals 2026
+- id: 9f2c8e1a-4b7d-4c2e-9a11-6f0d3e5b8c74
+- kind: competition
+- date: 2026-11-14
+- bodyweight: 88.4
+- category: 89 kg
+- org: BWL, IWF
+- age group: M40
+- target: 230 today
+
+## Qualification
+- from: 2026-01-01
+- to: 2026-10-31
+- counts: BWL, FPH
+
+### M35 89 kg
+- needs: 215
+
+### M40 89 kg
+- needs: 205
+
+## Snatch
+- 1: 95 good
+- 2: 99 miss
+- 3: 99 good
+
+### Warmup
+- [x] 20 x 5
+- [x] 60 x 2
+- [ ] 85 x 1
+
+## Clean & Jerk
+- 1: 120 good
+- 2: 125
+```
+
+- `- kind: competition` — what makes this a meet rather than a workout. It is
+  how an uploaded `.md` is routed by what it is rather than by which button it
+  came through, the same way a backup file is.
+- `- org:` — who sanctioned the meet. A **list**, because one meet often
+  answers to more than one body, and that is what decides where its result
+  travels: an international held in Portugal can be the thing that qualifies
+  you for something in England.
+- `- date:`, `- category:`, `- age group:`, `- bodyweight:` — what you entered
+  as. The class and the age group are free text: the IWF has rewritten both
+  lists more than once, and an app that owns them strands documents when they
+  change.
+- `- target:` — a total you want *today*. Not a qualifying mark.
+- `## Snatch` / `## Clean & Jerk` — `- <n>: <kg> [good|miss]`, three attempts
+  each. No result word means declared but not yet taken. Checkbox lines
+  anywhere in the section are warmup sets.
+- The **total** is the sum of each lift's best good attempt. Three misses in a
+  lift is a bomb-out: there is no total and there cannot be one, which is not
+  the same as not having one yet, and neither is ever shown as a zero.
+
+### Qualifying marks
+
+A qualifying total is a rule the meet you are **entering** owns, so it lives
+there: add the competition you are chasing, give it a `## Qualification`, and
+it says all three things a standard says — a number, a window it must be set
+in, and which federations' meets count.
+
+It is a **table**, not a number, because once masters are involved it is one:
+a `###` row per age group and bodyweight class. Your row is picked by the age
+group and category on the meet you are entering, so the M35 row is never
+quietly offered to an M40 lifter. A group with no row of its own gets **no**
+number rather than someone else's; the narrowest matching row wins; and if you
+have not said which group you are entering, you get the whole table.
+
+`M40`, `40-44`, `Masters 40` and `m40` all name the same group, as do `89`,
+`89 kg`, `89kg` and `-89` — `+89` is a different class and never matches `89`.
+A single mark for everyone is one `- needs: 250` line with no `###` row at
+all, and `- category:` written at section level qualifies every row under it.
+
+On a meet's own screen you see which of its marks are already answered, and by
+what. On any other meet you see what *that* meet can still win: marks whose
+window is closed, or whose federation list excludes it, are left out, and so
+is anything already banked elsewhere.
+
+A result's own age group and class are deliberately **not** required to match
+the row it answers — a qualifying window is long enough to age up inside, and
+which class a past total counts in is a rule federations write differently. The
+meet that satisfied a mark is shown with the class it was set in, so you can
+judge it.
+
 ## Calendar
 
 The 📅 calendar schedules workouts on dates: upload a `.md`, pick from the
@@ -152,7 +245,7 @@ only way your workouts exist anywhere but this phone is to export them.
 
 **Workouts → Backup → ⇩ Back up all** writes one `.md` file —
 `wltimer-backup-2026-08-09.md` — containing every library workout, every plan,
-and every calendar entry, done and planned. On Android that opens the system
+every competition, and every calendar entry, done and planned. On Android that opens the system
 save dialog, so picking Drive, Dropbox or Nextcloud as the destination puts it
 off the phone in one action. The name carries the date, so successive backups
 sit beside each other in the folder instead of replacing one another.
@@ -212,6 +305,7 @@ per file:
 workouts/<slug>.md.zst        # library templates: the markdown document
 days/<YYYY-MM-DD>.json.zst    # calendar: JSON array of entries, each with its
                               # own markdown copy + status/completed_at/source
+competitions/<slug>.md.zst    # meets: attempts, warmup, qualifying table
 ```
 
 Legacy plain `.md` library files migrate automatically at startup.

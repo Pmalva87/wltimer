@@ -4,6 +4,8 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 use wltimer_core::bundle::{self, ImportReport};
+use wltimer_core::comp::{self, Competition};
+use wltimer_core::comps::{CompStore, CompSummary};
 use wltimer_core::days::{self, DayEntry, DayStatus, DayStore, DaySummary};
 use wltimer_core::engine::{Cue, Engine, Snapshot};
 use wltimer_core::ids;
@@ -18,6 +20,7 @@ pub struct AppState {
     pub store: Store,
     pub days: DayStore,
     pub plans: PlanStore,
+    pub comps: CompStore,
     pub sessions: SessionStore,
     pub origin: Mutex<RunOrigin>,
 }
@@ -738,7 +741,12 @@ pub fn delete_plan(state: State<AppState>, slug: String) -> Result<(), String> {
 #[derive(Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum BundlePreview {
-    Ok { workouts: usize, plans: usize, days: usize },
+    Ok {
+        workouts: usize,
+        plans: usize,
+        days: usize,
+        competitions: usize,
+    },
     /// A perfectly good file that simply is not a backup — the upload falls
     /// through to the plan and workout importers.
     NotBundle,
@@ -749,7 +757,7 @@ pub enum BundlePreview {
 /// phone. The only export that captures the calendar.
 #[tauri::command]
 pub fn export_bundle(state: State<AppState>) -> String {
-    bundle::export(&state.store, &state.plans, &state.days, &now())
+    bundle::export(&state.store, &state.plans, &state.days, &state.comps, &now())
 }
 
 /// Check whether an upload is a backup bundle, and that all of it parses,
@@ -766,6 +774,7 @@ pub fn parse_bundle_preview(source: String) -> BundlePreview {
                 workouts: count(|s| matches!(s, bundle::Section::Workout(_))),
                 plans: count(|s| matches!(s, bundle::Section::Plan { .. })),
                 days: count(|s| matches!(s, bundle::Section::Day { .. })),
+                competitions: count(|s| matches!(s, bundle::Section::Competition(_))),
             }
         }
         Err(errors) => BundlePreview::Err { errors },
@@ -782,6 +791,7 @@ pub fn import_bundle(
         &state.store,
         &state.plans,
         &state.days,
+        &state.comps,
         &sections,
         &now(),
     ))
@@ -1093,4 +1103,200 @@ pub fn spawn_ticker(app: AppHandle) {
             }
         }
     });
+}
+
+// ---- competitions ----
+
+/// One of this meet's own qualifying rows, with what has already answered it.
+#[derive(Serialize)]
+pub struct StandardView {
+    pub total: f64,
+    pub label: String,
+    pub age_group: Option<String>,
+    pub category: Option<String>,
+    /// The meet that already satisfies this row, if one does.
+    pub met_by: Option<String>,
+    pub met_on: Option<String>,
+    pub met_total: Option<f64>,
+    /// The class that total was set in — the part of "already qualified" the
+    /// app will not decide on its own. See `Qualification::met_by`.
+    pub met_category: Option<String>,
+    /// Whether the row applies to the group this meet says it is entering.
+    pub yours: bool,
+}
+
+/// A qualifying mark from *another* meet that a total here could still satisfy.
+#[derive(Serialize)]
+pub struct MarkView {
+    pub slug: String,
+    pub meet: String,
+    pub total: f64,
+    pub label: String,
+    pub age_group: Option<String>,
+    pub category: Option<String>,
+    pub status: comp::TargetStatus,
+}
+
+#[derive(Serialize)]
+pub struct TargetView {
+    pub total: f64,
+    pub label: String,
+    pub status: comp::TargetStatus,
+}
+
+#[derive(Serialize)]
+pub struct CompView {
+    pub slug: String,
+    pub competition: Competition,
+    pub total: comp::TotalState,
+    pub best_possible_total: Option<f64>,
+    pub snatch_best: Option<f64>,
+    pub clean_jerk_best: Option<f64>,
+    /// Attempts declared lighter than the one before them, per lift, 1-based.
+    pub snatch_going_down: Vec<u8>,
+    pub clean_jerk_going_down: Vec<u8>,
+    pub snatch_notes_html: String,
+    pub clean_jerk_notes_html: String,
+    pub targets: Vec<TargetView>,
+    pub standards: Vec<StandardView>,
+    pub marks: Vec<MarkView>,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum CompParse {
+    Ok { competition: Box<Competition> },
+    Err { errors: Vec<ParseError> },
+}
+
+#[tauri::command]
+pub fn list_competitions(state: State<AppState>) -> Vec<CompSummary> {
+    state.comps.list()
+}
+
+#[tauri::command]
+pub fn get_competition_source(state: State<AppState>, slug: String) -> Result<String, String> {
+    state.comps.read_source(&slug)
+}
+
+/// Is this upload a competition document? The `- kind: competition` bullet is
+/// what lets a file be routed by what it is rather than by which button it
+/// arrived through — the same rule a backup bundle already follows.
+#[tauri::command]
+pub fn is_competition(source: String) -> bool {
+    comp::looks_like_competition(&source)
+}
+
+#[tauri::command]
+pub fn parse_competition_full(source: String) -> CompParse {
+    match comp::parse_competition(&source) {
+        Ok(c) => CompParse::Ok {
+            competition: Box::new(c),
+        },
+        Err(errors) => CompParse::Err { errors },
+    }
+}
+
+/// The editor builds a `Competition` and asks for its markdown, exactly as the
+/// workout builder does — so the document format has one writer, in Rust.
+#[tauri::command]
+pub fn serialize_competition(competition: Competition) -> String {
+    comp::competition_to_markdown(&competition)
+}
+
+#[tauri::command]
+pub fn save_competition(
+    state: State<AppState>,
+    source: String,
+    prev_slug: Option<String>,
+) -> Result<CompSummary, Vec<ParseError>> {
+    state.comps.save(&source, prev_slug.as_deref(), &now())
+}
+
+#[tauri::command]
+pub fn delete_competition(state: State<AppState>, slug: String) -> Result<(), String> {
+    state.comps.delete(&slug)
+}
+
+/// Everything the competition screen shows, including the two questions that
+/// can only be answered by looking at the other documents: which marks a total
+/// here could still win, and which of this meet's own marks are already won.
+#[tauri::command]
+pub fn view_competition(state: State<AppState>, slug: String) -> Result<CompView, String> {
+    let source = state.comps.read_source(&slug)?;
+    let c = comp::parse_competition(&source)
+        .map_err(|e| format!("line {}: {}", e[0].line, e[0].message))?;
+
+    // Every meet but this one. A competition neither qualifies you for itself
+    // nor counts as the result that answered its own standard.
+    let others: Vec<Competition> = state
+        .comps
+        .all()
+        .into_iter()
+        .filter(|o| match (&o.id, &c.id) {
+            (Some(a), Some(b)) => a != b,
+            _ => o.name != c.name,
+        })
+        .collect();
+
+    let standards = c.qualification.as_ref().map_or_else(Vec::new, |q| {
+        let mine = q.applicable(c.age_group.as_deref(), c.category.as_deref());
+        q.standards
+            .iter()
+            .map(|s| {
+                let met = q.met_by(s, &others);
+                StandardView {
+                    total: s.total,
+                    label: s.label.clone(),
+                    age_group: s.age_group.clone(),
+                    category: s.category.clone(),
+                    met_by: met.map(|m| m.name.clone()),
+                    met_on: met.and_then(|m| m.date.clone()),
+                    met_total: met.and_then(|m| m.total().kg()),
+                    met_category: met.and_then(|m| m.category.clone()),
+                    yours: mine.iter().any(|m| std::ptr::eq(*m, s)),
+                }
+            })
+            .collect()
+    });
+
+    let marks = comp::marks_in_play(&c, &others, &others)
+        .into_iter()
+        .map(|(meet, s)| MarkView {
+            slug: state
+                .comps
+                .find_by_id(meet.id.as_deref().unwrap_or(""))
+                .unwrap_or_default(),
+            meet: meet.name.clone(),
+            total: s.total,
+            label: s.label.clone(),
+            age_group: s.age_group.clone(),
+            category: s.category.clone(),
+            status: c.target_status(s.total),
+        })
+        .collect();
+
+    Ok(CompView {
+        slug,
+        total: c.total(),
+        best_possible_total: c.best_possible_total(),
+        snatch_best: c.snatch.best(),
+        clean_jerk_best: c.clean_jerk.best(),
+        snatch_going_down: c.snatch.attempts_going_down(),
+        clean_jerk_going_down: c.clean_jerk.attempts_going_down(),
+        snatch_notes_html: parser::render_markdown(&c.snatch.notes_md),
+        clean_jerk_notes_html: parser::render_markdown(&c.clean_jerk.notes_md),
+        targets: c
+            .targets
+            .iter()
+            .map(|t| TargetView {
+                total: t.total,
+                label: t.label.clone(),
+                status: c.target_status(t.total),
+            })
+            .collect(),
+        standards,
+        marks,
+        competition: c,
+    })
 }

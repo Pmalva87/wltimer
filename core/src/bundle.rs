@@ -13,6 +13,8 @@
 //! calendar entry already marked done is never replaced, and nothing is
 //! deleted for being absent from the bundle.
 
+use crate::comp;
+use crate::comps::CompStore;
 use crate::days::{self, valid_date, DayEntry, DayStatus, DayStore};
 use crate::ids;
 use crate::parser::{self, ParseError};
@@ -28,6 +30,7 @@ const END: &str = "-->";
 #[derive(Debug, Clone)]
 pub enum Section {
     Workout(String),
+    Competition(String),
     /// The slug is derived from the plan's title at parse time: a plan document
     /// carries ids for its days but none for itself, so its name is the only
     /// handle a restore has for matching the plan it replaces.
@@ -48,6 +51,7 @@ pub struct ImportReport {
     pub workouts: Counts,
     pub plans: Counts,
     pub days: Counts,
+    pub competitions: Counts,
     /// Documents that parsed but could not be written (a full disk, say).
     pub failed: usize,
 }
@@ -145,8 +149,14 @@ fn unescape_body(body: &str) -> String {
 
 // ---- writing ----
 
-/// Everything in the three stores, as one document.
-pub fn export(store: &Store, plans: &PlanStore, days: &DayStore, exported: &str) -> String {
+/// Everything in the four stores, as one document.
+pub fn export(
+    store: &Store,
+    plans: &PlanStore,
+    days: &DayStore,
+    comps: &CompStore,
+    exported: &str,
+) -> String {
     let workouts: Vec<String> = store
         .list()
         .into_iter()
@@ -166,13 +176,19 @@ pub fn export(store: &Store, plans: &PlanStore, days: &DayStore, exported: &str)
         })
         .filter(|(_, entries)| !entries.is_empty())
         .collect();
-    build(&workouts, &plan_docs, &calendar, exported)
+    let meets: Vec<String> = comps
+        .list()
+        .into_iter()
+        .filter_map(|s| comps.read_source(&s.slug).ok())
+        .collect();
+    build(&workouts, &plan_docs, &calendar, &meets, exported)
 }
 
 pub fn build(
     workouts: &[String],
     plans: &[String],
     days: &[(String, Vec<DayEntry>)],
+    competitions: &[String],
     exported: &str,
 ) -> String {
     let mut out = marker_line("backup", &[("exported", Some(exported))]);
@@ -190,6 +206,12 @@ pub fn build(
     }
     for p in plans {
         push(marker_line("plan", &[]), p);
+    }
+    // A competition carries its whole document, markers and all, exactly as a
+    // workout does — including the qualifying table, which is the only record
+    // of what a meet you have not been to yet asks for.
+    for c in competitions {
+        push(marker_line("competition", &[]), c);
     }
     for (date, entries) in days {
         for e in entries {
@@ -275,6 +297,10 @@ pub fn parse(source: &str) -> Result<Vec<Section>, Vec<ParseError>> {
                 Ok(_) => sections.push(Section::Workout(body)),
                 Err(es) => errors.extend(es.iter().map(|e| err(at(e), e.message.clone()))),
             },
+            "competition" => match comp::parse_competition(&body) {
+                Ok(_) => sections.push(Section::Competition(body)),
+                Err(es) => errors.extend(es.iter().map(|e| err(at(e), e.message.clone()))),
+            },
             "plan" => match plan::parse_plan(&body) {
                 Ok(p) => sections.push(Section::Plan { slug: slugify(&p.name), body }),
                 Err(es) => errors.extend(es.iter().map(|e| err(at(e), e.message.clone()))),
@@ -342,6 +368,7 @@ pub fn restore(
     store: &Store,
     plans: &PlanStore,
     days: &DayStore,
+    comps: &CompStore,
     sections: &[Section],
     now: &str,
 ) -> ImportReport {
@@ -362,6 +389,24 @@ pub fn restore(
                 match store.save(body, owner.as_deref(), &stamp_of(body, now)) {
                     Ok(_) if owner.is_some() => report.workouts.updated += 1,
                     Ok(_) => report.workouts.added += 1,
+                    Err(_) => report.failed += 1,
+                }
+            }
+            Section::Competition(body) => {
+                // The same four rules as a workout: matched by id so a second
+                // restore changes nothing, and an older copy loses.
+                let owner = ids::extract_id(body).and_then(|id| comps.find_by_id(&id));
+                let stored = owner.as_deref().and_then(|s| comps.read_source(s).ok());
+                if superseded(
+                    ids::extract_updated(body).as_deref(),
+                    stored.as_deref().and_then(ids::extract_updated).as_deref(),
+                ) {
+                    report.competitions.skipped += 1;
+                    continue;
+                }
+                match comps.save(body, owner.as_deref(), &stamp_of(body, now)) {
+                    Ok(_) if owner.is_some() => report.competitions.updated += 1,
+                    Ok(_) => report.competitions.added += 1,
                     Err(_) => report.failed += 1,
                 }
             }
@@ -466,6 +511,7 @@ mod tests {
         store: Store,
         plans: PlanStore,
         days: DayStore,
+        comps: CompStore,
     }
 
     fn stores(tag: &str) -> Stores {
@@ -474,11 +520,20 @@ mod tests {
             store: Store::new(dir.join("workouts")).unwrap(),
             plans: PlanStore::new(dir.join("plans")).unwrap(),
             days: DayStore::new(dir.join("days")).unwrap(),
+            comps: CompStore::new(dir.join("competitions")).unwrap(),
         }
     }
 
     fn workout(name: &str) -> String {
         format!("# {name}\n\n## A\n- work: 30\n")
+    }
+
+    fn meet(name: &str) -> String {
+        format!(
+            "# {name}\n- kind: competition\n- date: 2026-05-10\n- org: FPH, IWF\n\n\
+             ## Qualification\n- counts: BWL\n- needs: 250 A group\n\n\
+             ## Snatch\n- 1: 95 good\n\n## Clean & Jerk\n- 1: 120 good\n"
+        )
     }
 
     fn plan_doc() -> String {
@@ -502,7 +557,7 @@ mod tests {
         let day = entry(&workout("Monday"), DayStatus::Done);
         let days_in = vec![("2026-08-09".to_string(), vec![day.clone()])];
 
-        let text = build(std::slice::from_ref(&w), std::slice::from_ref(&p), &days_in, NOW);
+        let text = build(std::slice::from_ref(&w), std::slice::from_ref(&p), &days_in, &[], NOW);
         let sections = parse(&text).expect("should parse");
 
         assert_eq!(sections.len(), 3);
@@ -534,7 +589,7 @@ mod tests {
         e.source_slug = Some("monday-squats".into());
         e.source_plan = Some("block".into());
 
-        let text = build(&[], &[], &[("2026-08-09".into(), vec![e])], NOW);
+        let text = build(&[], &[], &[("2026-08-09".into(), vec![e])], &[], NOW);
         match &parse(&text).unwrap()[0] {
             Section::Day { entry, .. } => {
                 assert_eq!(entry.completed_at.as_deref(), Some(LATER));
@@ -550,7 +605,7 @@ mod tests {
         // Otherwise the file would split at that line and lose the rest of the
         // document under it.
         let w = "# Squats\n\n## A\n- work: 30\n\n<!-- wltimer:day date=2026-01-01 -->\n".to_string();
-        let text = build(std::slice::from_ref(&w), &[], &[], NOW);
+        let text = build(std::slice::from_ref(&w), &[], &[], &[], NOW);
         let sections = parse(&text).unwrap();
         assert_eq!(sections.len(), 1, "the note must not have opened a section");
         match &sections[0] {
@@ -563,13 +618,13 @@ mod tests {
     fn plain_documents_are_not_bundles() {
         assert!(!is_bundle(&workout("Squats")));
         assert!(!is_bundle(&plan_doc()));
-        assert!(is_bundle(&build(&[], &[], &[], NOW)));
+        assert!(is_bundle(&build(&[], &[], &[], &[], NOW)));
         assert!(parse(&workout("Squats")).is_err());
     }
 
     #[test]
     fn errors_point_at_the_line_in_the_bundle() {
-        let text = build(&[workout("Fine"), "# Broken\n\n## A\n- work: nope\n".into()], &[], &[], NOW);
+        let text = build(&[workout("Fine"), "# Broken\n\n## A\n- work: nope\n".into()], &[], &[], &[], NOW);
         let errors = parse(&text).expect_err("second workout should fail");
         let line = errors[0].line;
         let at = text.lines().nth(line - 1).unwrap_or_default();
@@ -583,9 +638,10 @@ mod tests {
             &[workout("Squats")],
             &[plan_doc()],
             &[("2026-08-09".into(), vec![entry(&workout("Monday"), DayStatus::Done)])],
+            &[],
             NOW,
         );
-        let report = restore(&s.store, &s.plans, &s.days, &parse(&text).unwrap(), NOW);
+        let report = restore(&s.store, &s.plans, &s.days, &s.comps, &parse(&text).unwrap(), NOW);
 
         assert_eq!(report.workouts.added, 1);
         assert_eq!(report.plans.added, 1);
@@ -607,11 +663,11 @@ mod tests {
         from.days
             .add("2026-08-09", entry(&workout("Monday"), DayStatus::Planned), NOW)
             .unwrap();
-        let sections = parse(&export(&from.store, &from.plans, &from.days, NOW)).unwrap();
+        let sections = parse(&export(&from.store, &from.plans, &from.days, &from.comps, NOW)).unwrap();
 
         let to = stores("idempotent-to");
-        restore(&to.store, &to.plans, &to.days, &sections, NOW);
-        let second = restore(&to.store, &to.plans, &to.days, &sections, NOW);
+        restore(&to.store, &to.plans, &to.days, &to.comps, &sections, NOW);
+        let second = restore(&to.store, &to.plans, &to.days, &to.comps, &sections, NOW);
 
         assert_eq!(to.store.list().len(), 1, "workout duplicated");
         assert_eq!(to.plans.list().len(), 1, "plan duplicated");
@@ -622,13 +678,58 @@ mod tests {
     }
 
     #[test]
+    fn a_competition_survives_the_round_trip_whole() {
+        let s = stores("comp-roundtrip");
+        let saved = s.comps.save(&meet("Lisbon Open"), None, NOW).unwrap();
+        let stored = s.comps.read_source(&saved.slug).unwrap();
+
+        let sections = parse(&export(&s.store, &s.plans, &s.days, &s.comps, NOW)).unwrap();
+        match sections.iter().find(|x| matches!(x, Section::Competition(_))) {
+            // Verbatim, like every other section: the qualifying table is the
+            // only record of what a meet you have not been to yet asks for.
+            Some(Section::Competition(body)) => assert_eq!(body, &stored),
+            other => panic!("expected a competition, got {other:?}"),
+        }
+
+        let to = stores("comp-roundtrip-to");
+        let report = restore(&to.store, &to.plans, &to.days, &to.comps, &sections, NOW);
+        assert_eq!(report.competitions.added, 1);
+        assert_eq!(to.comps.read_source(&saved.slug).unwrap(), stored);
+
+        // Restoring the same bundle twice changes nothing the second time.
+        let again = restore(&to.store, &to.plans, &to.days, &to.comps, &sections, NOW);
+        assert_eq!(again.competitions.added, 0);
+        assert_eq!(again.competitions.updated, 1);
+        assert_eq!(to.comps.list().len(), 1);
+    }
+
+    #[test]
+    fn an_older_competition_in_a_backup_loses() {
+        let s = stores("comp-older");
+        let saved = s.comps.save(&meet("Lisbon Open"), None, LATER).unwrap();
+        let current = s.comps.read_source(&saved.slug).unwrap();
+        let stale = ids::set_updated(&current, NOW).replace("- 1: 120 good", "- 1: 110 good");
+
+        let report = restore(
+            &s.store,
+            &s.plans,
+            &s.days,
+            &s.comps,
+            &[Section::Competition(stale)],
+            NOW,
+        );
+        assert_eq!(report.competitions.skipped, 1);
+        assert_eq!(s.comps.read_source(&saved.slug).unwrap(), current);
+    }
+
+    #[test]
     fn an_older_copy_never_beats_what_is_stored() {
         let s = stores("older");
         let saved = s.store.save(&workout("Squats"), None, LATER).unwrap();
         let current = s.store.read_source(&saved.slug).unwrap();
         let stale = ids::set_updated(&current.replace("- work: 30", "- work: 15"), NOW);
 
-        let report = restore(&s.store, &s.plans, &s.days, &[Section::Workout(stale)], NOW);
+        let report = restore(&s.store, &s.plans, &s.days, &s.comps, &[Section::Workout(stale)], NOW);
         assert_eq!(report.workouts.skipped, 1);
         assert!(s.store.read_source(&saved.slug).unwrap().contains("- work: 30"));
     }
@@ -640,7 +741,7 @@ mod tests {
         let current = s.store.read_source(&saved.slug).unwrap();
         let fresh = ids::set_updated(&current.replace("- work: 30", "- work: 45"), LATER);
 
-        let report = restore(&s.store, &s.plans, &s.days, &[Section::Workout(fresh)], NOW);
+        let report = restore(&s.store, &s.plans, &s.days, &s.comps, &[Section::Workout(fresh)], NOW);
         assert_eq!(report.workouts.updated, 1);
         assert_eq!(s.store.list().len(), 1);
         let stored = s.store.read_source(&saved.slug).unwrap();
@@ -667,6 +768,7 @@ mod tests {
             &s.store,
             &s.plans,
             &s.days,
+            &s.comps,
             &[Section::Day { date: "2026-08-09".into(), entry: planned }],
             NOW,
         );
@@ -690,6 +792,7 @@ mod tests {
             &s.store,
             &s.plans,
             &s.days,
+            &s.comps,
             &[Section::Day { date: "2026-08-09".into(), entry: done }],
             NOW,
         );
@@ -704,8 +807,8 @@ mod tests {
         // The day sections are the record of what was scheduled; a sync on top
         // of them would re-plan days over their restored state.
         let s = stores("nosync");
-        let sections = parse(&build(&[], &[plan_doc()], &[], NOW)).unwrap();
-        restore(&s.store, &s.plans, &s.days, &sections, NOW);
+        let sections = parse(&build(&[], &[plan_doc()], &[], &[], NOW)).unwrap();
+        restore(&s.store, &s.plans, &s.days, &s.comps, &sections, NOW);
 
         assert_eq!(s.plans.list().len(), 1);
         assert!(s.days.load("2026-08-10").is_empty(), "restore must not sync");
@@ -725,6 +828,7 @@ mod tests {
             &s.store,
             &s.plans,
             &s.days,
+            &s.comps,
             &[Section::Day { date: "2026-08-09".into(), entry }],
             NOW,
         );
@@ -742,7 +846,7 @@ mod tests {
             .add("2026-08-09", entry(&workout("Monday"), DayStatus::Done), NOW)
             .unwrap();
 
-        let text = export(&s.store, &s.plans, &s.days, NOW);
+        let text = export(&s.store, &s.plans, &s.days, &s.comps, NOW);
         let sections = parse(&text).expect("an export must parse");
         assert_eq!(sections.len(), 3, "{text}");
     }

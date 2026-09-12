@@ -2,6 +2,7 @@ import {
   api,
   fmtDuration,
   todayStr,
+  type CompSummary,
   type ImportReport,
   type ParseError,
   type PlanImport,
@@ -57,8 +58,10 @@ function restoreSummary(r: ImportReport): string {
     plural(r.workouts.added + r.workouts.updated, "workout", "workouts"),
     plural(r.plans.added + r.plans.updated, "plan", "plans"),
     plural(r.days.added + r.days.updated, "calendar entry", "calendar entries"),
+    plural(r.competitions.added + r.competitions.updated, "competition", "competitions"),
   ].join(", ");
-  const skipped = r.workouts.skipped + r.plans.skipped + r.days.skipped;
+  const skipped =
+    r.workouts.skipped + r.plans.skipped + r.days.skipped + r.competitions.skipped;
   let msg = `✓ restored ${applied}`;
   if (skipped > 0) msg += ` · ${skipped} already up to date`;
   if (r.failed > 0) msg += ` · ${plural(r.failed, "document", "documents")} could not be written`;
@@ -81,8 +84,51 @@ function armDelete(btn: HTMLButtonElement, label: string, action: () => Promise<
   });
 }
 
+/** One competition in the Workouts list: what it is, and what became of it. */
+function compRow(c: CompSummary): string {
+  if (c.error) {
+    return `<div class="workout broken">
+              <a class="info tappable" href="#/compedit/${encodeURIComponent(c.slug)}">
+                <span class="name">🏆 ${esc(c.name)}</span>
+                <span class="meta error">${esc(c.error)}</span>
+              </a>
+            </div>`;
+  }
+  const bits = [
+    c.date ?? "no date",
+    ...(c.orgs.length ? [esc(c.orgs.join(" · "))] : []),
+    ...(c.age_group || c.category ? [esc([c.age_group, c.category].filter(Boolean).join(" "))] : []),
+  ];
+  // The two kinds of row a competition list holds: one you lifted at, and one
+  // you are trying to get into.
+  if (c.total.state === "made") {
+    bits.push(`<strong>${c.total.total} total</strong>`);
+  } else if (c.total.state === "bombed_out") {
+    bits.push(`no total`);
+  } else if (c.attempts_taken > 0) {
+    bits.push(`${c.attempts_taken} attempt${c.attempts_taken === 1 ? "" : "s"} in`);
+  }
+  if (c.standards > 0) {
+    bits.push(`🎯 ${c.standards} mark${c.standards === 1 ? "" : "s"} to get in`);
+  }
+  return `<div class="workout">
+            <a class="info tappable" href="#/comp/${encodeURIComponent(c.slug)}">
+              <span class="name">🏆 ${esc(c.name)}</span>
+              <span class="meta">${bits.join(" · ")}</span>
+            </a>
+            <div class="actions compact">
+              <a class="btn primary" href="#/comp/${encodeURIComponent(c.slug)}">👁 View</a>
+              <a class="btn" href="#/compedit/${encodeURIComponent(c.slug)}">✎ Edit</a>
+            </div>
+          </div>`;
+}
+
 export async function renderLibrary(root: HTMLElement) {
-  const [items, plans] = await Promise.all([api.listWorkouts(), api.listPlans()]);
+  const [items, plans, comps] = await Promise.all([
+    api.listWorkouts(),
+    api.listPlans(),
+    api.listCompetitions(),
+  ]);
   root.innerHTML = `
     <div class="screen library">
       <header class="topbar">
@@ -131,6 +177,17 @@ export async function renderLibrary(root: HTMLElement) {
                 .join("")
         }
         <div id="libstatus" class="editor-status"></div>
+        <div class="section-head">
+          <h2>Competitions</h2>
+          <div class="section-actions">
+            <a class="btn" href="#/compedit">+ New meet</a>
+          </div>
+        </div>
+        ${
+          comps.length === 0
+            ? `<div class="empty small">No competitions — add a meet to record its attempts, or one you are chasing to record what it takes to get in.</div>`
+            : comps.map(compRow).join("")
+        }
         <div class="section-head">
           <h2>Single workouts</h2>
           <div class="section-actions">
@@ -241,6 +298,9 @@ export async function renderLibrary(root: HTMLElement) {
       let message: string;
       if (bundle.status === "ok") {
         message = restoreSummary(await api.importBundle(text));
+      } else if (await api.isCompetition(text)) {
+        const sum = await api.saveCompetition(text, null);
+        message = `✓ "${sum.name}" imported`;
       } else if ((await api.parsePlanPreview(text)).status === "ok") {
         message = planImportSummary(await api.importPlan(text));
       } else {

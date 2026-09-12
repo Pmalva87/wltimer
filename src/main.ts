@@ -6,6 +6,8 @@ import { renderCalendar } from "./screens/calendar";
 import { renderPlanFrom } from "./screens/planfrom";
 import { renderPlan } from "./screens/plan";
 import { renderView } from "./screens/view";
+import { renderComp } from "./screens/comp";
+import { renderCompEdit } from "./screens/compedit";
 import { lastTab, rememberTab } from "./tabs";
 
 type Cleanup = (() => void) | void;
@@ -41,6 +43,12 @@ async function route() {
   } else if (screen === "calendar") {
     rememberTab("#/calendar");
     cleanup = await renderCalendar(app, slug);
+  } else if (screen === "comp" && slug) {
+    cleanup = await renderComp(app, slug);
+  } else if (screen === "compedit") {
+    // No slug is a meet that does not exist yet — the same shape the builder
+    // uses for a new workout.
+    cleanup = await renderCompEdit(app, slug);
   } else if (screen === "view" && slug) {
     cleanup = await renderView(app, slug, from);
   } else if (screen === "run" && slug) {

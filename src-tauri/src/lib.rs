@@ -5,6 +5,7 @@ use std::sync::Mutex;
 use tauri::Manager;
 use wltimer_core::days::DayStore;
 use wltimer_core::engine::Engine;
+use wltimer_core::comps::CompStore;
 use wltimer_core::plan::PlanStore;
 use wltimer_core::session::{RunOrigin, SessionStore};
 use wltimer_core::store::Store;
@@ -19,6 +20,7 @@ pub fn run() {
                 store: Store::new(data.join("workouts"))?,
                 days: DayStore::new(data.join("days"))?,
                 plans: PlanStore::new(data.join("plans"))?,
+                comps: CompStore::new(data.join("competitions"))?,
                 sessions: SessionStore::new(data)?,
                 origin: Mutex::new(RunOrigin::None),
             });
@@ -56,6 +58,14 @@ pub fn run() {
             commands::create_plan_from_days,
             commands::sync_plan,
             commands::delete_plan,
+            commands::list_competitions,
+            commands::get_competition_source,
+            commands::is_competition,
+            commands::parse_competition_full,
+            commands::serialize_competition,
+            commands::save_competition,
+            commands::delete_competition,
+            commands::view_competition,
             commands::export_bundle,
             commands::parse_bundle_preview,
             commands::import_bundle,

@@ -144,6 +144,7 @@ legacy `.md` files migrate):
 | `store.rs` | `workouts/<slug>.md.zst` | library templates, markdown |
 | `days.rs` | `days/<YYYY-MM-DD>.json.zst` | calendar entries, each with its own markdown copy |
 | `plan.rs` | `plans/<slug>.md.zst` | multi-day training plans |
+| `comps.rs` | `competitions/<slug>.md.zst` | meets: attempts, warmup, qualifying table |
 | `session.rs` | app-data root | the single in-flight session |
 
 Calendar entries embed a full markdown copy rather than referencing a template,
@@ -171,6 +172,41 @@ reader downstream has to know about them. `PlanStore::save` replaces the
 document outright; it is the "Replace" button and, for its own reasons above,
 bundle restore. Both route by identity: the plan's own `- id:`, falling back to
 a day-id overlap for files written from a copy that predates plan ids.
+
+### Competitions (`core/src/comp.rs`, `core/src/comps.rs`)
+
+A meet is a document kind of its own, not a `Workout` with the timing left
+blank — there are no phases to flatten and no clock the app owns. `comp.rs`
+holds the model, the markdown, and the arithmetic; `comps.rs` is the store, and
+follows `store.rs` line for line (identity decides what a save updates, a name
+collision on a new meet gets a counter). The two lifts are **fixed**: the total
+is defined as the sum of their bests, so a configurable list would leave every
+screen asking which lifts a meet has for a generality the sport lacks.
+
+Three rules carry most of the weight:
+
+- **A total is three-state.** `TotalState` is `Made`/`Open`/`BombedOut`, not an
+  `Option`, because "no total yet" and "no total, ever" are different facts and
+  a bombed lift must never sum as a zero.
+- **A qualifying mark hangs off the meet it admits you to**, never the meet you
+  are lifting at — that is where the rule lives, and it is bounded two ways at
+  once (a window, and which sanctioning bodies count). `Competition::orgs` is a
+  list and eligibility is an *overlap*, so a meet sanctioned by two federations
+  counts wherever either does. `Qualification` is a **table** of `Standard`
+  rows, because a masters standard is one: `applicable` picks rows by the age
+  group and category of the entry you intend, and a row naming a group the
+  entry does not match is not a fallback — it is a different lifter's number.
+- **`target_status` only names one attempt once the other lift is closed** —
+  out of attempts, *or* overtaken by the order of the meet (a taken clean &
+  jerk closes the snatch). Otherwise a banked snatch you could still improve
+  would be treated as a number to subtract from. `OutOfReach` is only ever
+  proved: a remaining attempt may be declared at any weight.
+
+`met_by` deliberately does not require a past result's own age group or class
+to match the row it answers — a window is long enough to age up inside, and
+federations differ on the class question — so the meet that satisfied it is
+surfaced with its class for the user to judge. Change that only with a real
+rule to point at.
 
 ### Backup bundles (`core/src/bundle.rs`)
 
