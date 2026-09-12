@@ -5,6 +5,7 @@ import {
   type CompView,
   type LiftEntry,
   type MarkView,
+  type Qualification,
   type StandardView,
   type TargetStatus,
   type TotalState,
@@ -96,6 +97,7 @@ export async function renderComp(root: HTMLElement, slug: string) {
       <div class="view-scroll">
         <h1 class="view-title">🏆 ${esc(c.name)}</h1>
         ${meta.length ? `<div class="comp-meta">${meta.map((m) => `<span>${m}</span>`).join("")}</div>` : ""}
+        ${standardsSection(view.standards, c.age_group, c.category, c.qualification)}
         ${totalPanel(view)}
         ${hasData(c.snatch) ? liftCard("Snatch", c.snatch, view.snatch_best, view.snatch_going_down, view.snatch_notes_html) : ""}
         ${hasData(c.clean_jerk) ? liftCard("Clean & Jerk", c.clean_jerk, view.clean_jerk_best, view.clean_jerk_going_down, view.clean_jerk_notes_html) : ""}
@@ -110,7 +112,6 @@ export async function renderComp(root: HTMLElement, slug: string) {
             : ""
         }
         ${marksSection(view.marks)}
-        ${standardsSection(view.standards, c.age_group, c.category)}
       </div>
     </div>`;
 }
@@ -211,16 +212,27 @@ function marksSection(marks: MarkView[]): string {
 }
 
 /** This meet's own entry standards, and what has already answered them. */
+/** `from`/`to` as a reader-facing range — either end may be open. */
+function windowText(q: Qualification): string | null {
+  if (!q.from && !q.to) return null;
+  if (q.from && q.to) return `Results from ${fmtDay(q.from)} to ${fmtDay(q.to)} count`;
+  if (q.from) return `Results from ${fmtDay(q.from)} on count`;
+  return `Results up to ${fmtDay(q.to!)} count`;
+}
+
 function standardsSection(
   standards: StandardView[],
   ageGroup: string | null,
   category: string | null,
+  qualification: Qualification | null,
 ): string {
   if (standards.length === 0) return "";
   const said = ageGroup || category;
+  const window = qualification ? windowText(qualification) : null;
   return `
     <section class="view-part">
       <div class="view-part-head"><h2>Entry standard</h2></div>
+      ${window ? `<div class="comp-hint">🗓 ${window}</div>` : ""}
       ${standards
         .map((s) => {
           const label = [group(s.age_group, s.category), s.label].filter(Boolean).join(" · ");
