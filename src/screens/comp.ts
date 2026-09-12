@@ -1,6 +1,7 @@
 import {
   api,
   fmtKg,
+  type CompSummary,
   type CompView,
   type LiftEntry,
   type MarkView,
@@ -9,6 +10,46 @@ import {
   type TotalState,
 } from "../api";
 import { esc } from "./library";
+
+/** One competition as a list row, shared by the Competitions screen. */
+export function compRow(c: CompSummary): string {
+  if (c.error) {
+    return `<div class="workout broken">
+              <a class="info tappable" href="#/compedit/${encodeURIComponent(c.slug)}">
+                <span class="name">🏆 ${esc(c.name)}</span>
+                <span class="meta error">${esc(c.error)}</span>
+              </a>
+            </div>`;
+  }
+  const bits = [
+    c.date ?? "no date",
+    ...(c.organizer ? [`by ${esc(c.organizer)}`] : []),
+    ...(c.orgs.length ? [esc(c.orgs.join(" · "))] : []),
+    ...(c.age_group || c.category ? [esc([c.age_group, c.category].filter(Boolean).join(" "))] : []),
+  ];
+  // The two kinds of row a competition list holds: one you lifted at, and one
+  // you are trying to get into.
+  if (c.total.state === "made") {
+    bits.push(`<strong>${c.total.total} total</strong>`);
+  } else if (c.total.state === "bombed_out") {
+    bits.push(`no total`);
+  } else if (c.attempts_taken > 0) {
+    bits.push(`${c.attempts_taken} attempt${c.attempts_taken === 1 ? "" : "s"} in`);
+  }
+  if (c.standards > 0) {
+    bits.push(`🎯 ${c.standards} mark${c.standards === 1 ? "" : "s"} to get in`);
+  }
+  return `<div class="workout">
+            <a class="info tappable" href="#/comp/${encodeURIComponent(c.slug)}">
+              <span class="name">🏆 ${esc(c.name)}</span>
+              <span class="meta">${bits.join(" · ")}</span>
+            </a>
+            <div class="actions compact">
+              <a class="btn primary" href="#/comp/${encodeURIComponent(c.slug)}">👁 View</a>
+              <a class="btn" href="#/compedit/${encodeURIComponent(c.slug)}">✎ Edit</a>
+            </div>
+          </div>`;
+}
 
 /**
  * A competition, read-only. Everything on this screen is either written in the
@@ -35,6 +76,7 @@ export async function renderComp(root: HTMLElement, slug: string) {
   const c = view.competition;
   const meta = [
     c.date ? `📅 ${fmtDay(c.date)}` : null,
+    c.organizer ? `organized by ${esc(c.organizer)}` : null,
     c.orgs.length ? esc(c.orgs.join(" · ")) : null,
     c.category ? esc(c.category) : null,
     c.age_group ? esc(c.age_group) : null,

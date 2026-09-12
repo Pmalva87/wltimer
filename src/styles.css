@@ -80,7 +80,7 @@ body {
 
 .tabbar {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   border-top: 1px solid #334155;
   background: var(--bg);
   padding: 0.35rem 0 calc(0.35rem + env(safe-area-inset-bottom));
@@ -1428,4 +1428,45 @@ a.ov-note {
 }
 .comp-danger {
   margin: 1.5rem 0 0.5rem;
+}
+
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.3rem 0.25rem 0.6rem;
+  border-radius: 999px;
+  background: #33415588;
+  color: var(--text);
+  font-size: 0.85rem;
+}
+.chip-remove {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1;
+  padding: 0.2rem;
+  cursor: pointer;
+}
+.chip-remove:hover {
+  color: var(--danger);
+}
+
+.org-add-row {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+}
+.org-add-row .text-input {
+  flex: 1 1 auto;
+}
+.org-add-row .btn {
+  flex: 0 0 auto;
 }

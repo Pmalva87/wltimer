@@ -6,6 +6,7 @@ use tauri::Manager;
 use wltimer_core::days::DayStore;
 use wltimer_core::engine::Engine;
 use wltimer_core::comps::CompStore;
+use wltimer_core::orgs::OrgStore;
 use wltimer_core::plan::PlanStore;
 use wltimer_core::session::{RunOrigin, SessionStore};
 use wltimer_core::store::Store;
@@ -21,6 +22,7 @@ pub fn run() {
                 days: DayStore::new(data.join("days"))?,
                 plans: PlanStore::new(data.join("plans"))?,
                 comps: CompStore::new(data.join("competitions"))?,
+                orgs: OrgStore::new(data.join("organizations"))?,
                 sessions: SessionStore::new(data)?,
                 origin: Mutex::new(RunOrigin::None),
             });
@@ -66,6 +68,9 @@ pub fn run() {
             commands::save_competition,
             commands::delete_competition,
             commands::view_competition,
+            commands::list_organizations,
+            commands::add_organization,
+            commands::delete_organization,
             commands::export_bundle,
             commands::parse_bundle_preview,
             commands::import_bundle,

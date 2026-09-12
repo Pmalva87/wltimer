@@ -8,6 +8,7 @@ import { renderPlan } from "./screens/plan";
 import { renderView } from "./screens/view";
 import { renderComp } from "./screens/comp";
 import { renderCompEdit } from "./screens/compedit";
+import { renderCompetitions } from "./screens/competitions";
 import { lastTab, rememberTab } from "./tabs";
 
 type Cleanup = (() => void) | void;
@@ -43,6 +44,9 @@ async function route() {
   } else if (screen === "calendar") {
     rememberTab("#/calendar");
     cleanup = await renderCalendar(app, slug);
+  } else if (screen === "competitions") {
+    rememberTab("#/competitions");
+    cleanup = await renderCompetitions(app);
   } else if (screen === "comp" && slug) {
     cleanup = await renderComp(app, slug);
   } else if (screen === "compedit") {

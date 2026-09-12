@@ -215,6 +215,8 @@ export interface Competition {
   category: string | null;
   /** A meet can answer to more than one body; eligibility is an overlap. */
   orgs: string[];
+  /** Who is running the meet — distinct from `orgs`, which sanctions it. */
+  organizer: string | null;
   age_group: string | null;
   targets: Target[];
   qualification: Qualification | null;
@@ -238,6 +240,7 @@ export interface CompSummary {
   name: string;
   date: string | null;
   orgs: string[];
+  organizer: string | null;
   category: string | null;
   age_group: string | null;
   total: TotalState;
@@ -305,6 +308,7 @@ export function newCompetition(name: string, date: string | null): Competition {
     bodyweight: null,
     category: null,
     orgs: [],
+    organizer: null,
     age_group: null,
     targets: [],
     qualification: null,
@@ -488,6 +492,10 @@ export const api = {
     invoke<CompSummary>("save_competition", { source, prevSlug }),
   deleteCompetition: (slug: string) => invoke<void>("delete_competition", { slug }),
   viewCompetition: (slug: string) => invoke<CompView>("view_competition", { slug }),
+  /** Suggestions for the organizer/orgs pickers — not a closed list. */
+  listOrganizations: () => invoke<string[]>("list_organizations"),
+  addOrganization: (name: string) => invoke<string[]>("add_organization", { name }),
+  deleteOrganization: (name: string) => invoke<string[]>("delete_organization", { name }),
   /** The whole library, plans and calendar as one markdown document. */
   exportBundle: () => invoke<string>("export_bundle"),
   parseBundlePreview: (source: string) =>

@@ -217,6 +217,13 @@ pub struct Competition {
     /// Portugal can be the thing that qualifies you for something in England.
     #[serde(default)]
     pub orgs: Vec<String>,
+    /// Who is running the meet — a club, a federation, a promoter. Distinct
+    /// from `orgs`: a national championships can be organized by one
+    /// federation and still count for others' qualifying windows. Free text
+    /// for the same reason `orgs` is; [`crate::orgs::OrgStore`] only supplies
+    /// a picker's suggestions, not a closed list.
+    #[serde(default)]
+    pub organizer: Option<String>,
     /// The age group entered — `M40`, `40-44`, `Senior`. On a meet you have
     /// lifted at, the group you were in; on one you are chasing, the group you
     /// intend to enter, which is what picks your row out of its table.
@@ -243,6 +250,7 @@ impl Competition {
             bodyweight: None,
             category: None,
             orgs: Vec::new(),
+            organizer: None,
             age_group: None,
             targets: Vec::new(),
             qualification: None,
@@ -831,6 +839,9 @@ pub fn competition_to_markdown(c: &Competition) -> String {
     if !c.orgs.is_empty() {
         out.push_str(&format!("- org: {}\n", c.orgs.join(", ")));
     }
+    if let Some(o) = &c.organizer {
+        out.push_str(&format!("- organizer: {o}\n"));
+    }
     if let Some(g) = &c.age_group {
         out.push_str(&format!("- age group: {g}\n"));
     }
@@ -1247,6 +1258,13 @@ fn preamble(c: &mut Competition, key: &str, val: &str, line: usize, errors: &mut
             }
         }
         "org" | "orgs" | "federation" | "sanctioned by" => c.orgs.extend(list(val)),
+        "organizer" | "organiser" | "organized by" | "organised by" => {
+            if c.organizer.is_some() {
+                dup("organizer", errors);
+            } else {
+                c.organizer = Some(val.to_string());
+            }
+        }
         "age group" | "age" => {
             if c.age_group.is_some() {
                 dup("age group", errors);
@@ -1281,6 +1299,7 @@ mod tests {
 - bodyweight: 88.4
 - category: 89 kg
 - org: BWL, IWF
+- organizer: Portuguese Weightlifting Federation
 - age group: M40
 - target: 230 today
 
@@ -1349,6 +1368,7 @@ Openers felt fast.
         assert_eq!(c.bodyweight, Some(88.4));
         assert_eq!(c.category.as_deref(), Some("89 kg"));
         assert_eq!(c.orgs, vec!["BWL", "IWF"]);
+        assert_eq!(c.organizer.as_deref(), Some("Portuguese Weightlifting Federation"));
         assert_eq!(c.age_group.as_deref(), Some("M40"));
         assert_eq!(c.targets.len(), 1);
         assert_eq!(c.targets[0].total, 230.0);
@@ -1382,6 +1402,21 @@ Openers felt fast.
         let c = parse_competition(FULL).unwrap();
         let md = competition_to_markdown(&c);
         assert_eq!(parse_competition(&md).unwrap(), c);
+    }
+
+    #[test]
+    fn organizer_may_be_spelled_either_way() {
+        for key in ["organizer", "organiser", "organized by", "organised by"] {
+            let c = parse_competition(&format!("# M\n- {key}: BWL\n")).unwrap();
+            assert_eq!(c.organizer.as_deref(), Some("BWL"), "{key}");
+        }
+    }
+
+    #[test]
+    fn a_second_organizer_is_an_error() {
+        let errs =
+            parse_competition("# M\n- organizer: BWL\n- organizer: IWF\n").unwrap_err();
+        assert!(errs[0].message.contains("duplicate 'organizer'"));
     }
 
     #[test]

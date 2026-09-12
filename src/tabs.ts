@@ -1,7 +1,8 @@
-export type Tab = "quick" | "library" | "history";
+export type Tab = "quick" | "library" | "competitions" | "history";
 
 const TAB_KEY = "wltimer.tab";
 const DEFAULT_TAB = "#/quick";
+const HASHES = ["#/quick", "#/library", "#/competitions", "#/calendar"];
 
 /** Remember the active top-level tab so the app reopens on it. */
 export function rememberTab(hash: string) {
@@ -10,9 +11,7 @@ export function rememberTab(hash: string) {
 
 export function lastTab(): string {
   const stored = localStorage.getItem(TAB_KEY);
-  return stored === "#/quick" || stored === "#/library" || stored === "#/calendar"
-    ? stored
-    : DEFAULT_TAB;
+  return stored && HASHES.includes(stored) ? stored : DEFAULT_TAB;
 }
 
 export function tabBar(active: Tab): string {
@@ -22,6 +21,7 @@ export function tabBar(active: Tab): string {
     <nav class="tabbar">
       ${tab("quick", "#/quick", "⚡", "Quick")}
       ${tab("library", "#/library", "📚", "Workouts")}
+      ${tab("competitions", "#/competitions", "🏆", "Meets")}
       ${tab("history", "#/calendar", "📅", "History")}
     </nav>`;
 }

@@ -26,6 +26,10 @@ import { esc } from "./library";
 export async function renderCompEdit(root: HTMLElement, slug: string | null) {
   let c: Competition = newCompetition("", todayStr());
   let loadError: string | null = null;
+  let organizations = await api.listOrganizations();
+  // Which org picker, if any, is showing its "new organization" row instead
+  // of its dropdown — at most one at a time, since it is one form.
+  let addingOrgFor: string | null = null;
 
   if (slug) {
     try {
@@ -58,9 +62,14 @@ export async function renderCompEdit(root: HTMLElement, slug: string | null) {
             ${field("Name", `<input class="text-input" id="name" value="${esc(c.name)}" placeholder="Portuguese Nationals 2027">`)}
             ${field("Date", `<input class="text-input" id="date" type="date" value="${esc(c.date ?? "")}">`)}
             ${field(
+              "Organizer",
+              orgPicker("organizer", "single", c.organizer ? [c.organizer] : [], organizations, addingOrgFor),
+              "Who is running the meet.",
+            )}
+            ${field(
               "Sanctioned by",
-              `<input class="text-input" id="orgs" value="${esc(c.orgs.join(", "))}" placeholder="FPH, IWF">`,
-              "Comma-separated. This is what decides whether a total here counts towards another meet's standard.",
+              orgPicker("orgs", "multi", c.orgs, organizations, addingOrgFor),
+              "This is what decides whether a total here counts towards another meet's standard.",
             )}
             ${field("Weight class", `<input class="text-input" id="category" value="${esc(c.category ?? "")}" placeholder="89 kg">`)}
             ${field("Age group", `<input class="text-input" id="agegroup" value="${esc(c.age_group ?? "")}" placeholder="M40">`)}
@@ -86,7 +95,7 @@ export async function renderCompEdit(root: HTMLElement, slug: string | null) {
             must be set in, and which federations' meets count. Add it here, on
             the competition you are trying to enter.
           </div>
-          ${c.qualification ? qualSection(c.qualification) : ""}
+          ${c.qualification ? qualSection(c.qualification, organizations, addingOrgFor) : ""}
 
           ${
             slug
@@ -105,14 +114,70 @@ export async function renderCompEdit(root: HTMLElement, slug: string | null) {
     };
     const text = (v: string): string | null => (v.trim() === "" ? null : v.trim());
 
+    // One org picker's worth of wiring: picking an existing organization
+    // (or clearing a single-value field back to none), picking "+ New" to
+    // reveal the add row, confirming or cancelling that row, and removing a
+    // chip from a multi-value field. `get`/`set` reach into whichever part of
+    // `c` this picker owns, so the same wiring serves all three of them.
+    function bindOrgPicker(
+      fieldId: string,
+      mode: "single" | "multi",
+      get: () => string[],
+      set: (values: string[]) => void,
+    ) {
+      root.querySelector<HTMLSelectElement>(`[data-orgpick="${fieldId}"]`)?.addEventListener("change", (ev) => {
+        const value = (ev.currentTarget as HTMLSelectElement).value;
+        if (value === "__new__") {
+          addingOrgFor = fieldId;
+          render();
+          root.querySelector<HTMLInputElement>(`#orgnew-${fieldId}`)?.focus();
+          return;
+        }
+        if (mode === "single") {
+          set(value ? [value] : []);
+        } else if (value && !get().some((v) => v.toLowerCase() === value.toLowerCase())) {
+          set([...get(), value]);
+        }
+        render();
+      });
+      root.querySelector<HTMLButtonElement>(`[data-orgconfirm="${fieldId}"]`)?.addEventListener("click", () => {
+        void (async () => {
+          const input = root.querySelector<HTMLInputElement>(`#orgnew-${fieldId}`)!;
+          const name = input.value.trim();
+          if (name === "") return;
+          organizations = await api.addOrganization(name);
+          set(mode === "single" ? [name] : [...get(), name]);
+          addingOrgFor = null;
+          render();
+        })();
+      });
+      root.querySelector<HTMLButtonElement>(`[data-orgcancel="${fieldId}"]`)?.addEventListener("click", () => {
+        addingOrgFor = null;
+        render();
+      });
+      root.querySelectorAll<HTMLButtonElement>(`[data-orgdel^="${fieldId}:"]`).forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const i = Number(btn.dataset.orgdel!.split(":")[1]);
+          set(get().filter((_, idx) => idx !== i));
+          render();
+        });
+      });
+    }
+
     on("name", "input", (el) => (c.name = el.value));
     on("date", "change", (el) => (c.date = text(el.value)));
-    on("orgs", "input", (el) => {
-      c.orgs = el.value
-        .split(",")
-        .map((s) => s.trim())
-        .filter((s) => s !== "");
-    });
+    bindOrgPicker(
+      "organizer",
+      "single",
+      () => (c.organizer ? [c.organizer] : []),
+      (v) => (c.organizer = v[0] ?? null),
+    );
+    bindOrgPicker(
+      "orgs",
+      "multi",
+      () => c.orgs,
+      (v) => (c.orgs = v),
+    );
     on("category", "input", (el) => (c.category = text(el.value)));
     on("agegroup", "input", (el) => (c.age_group = text(el.value)));
     on("bodyweight", "input", (el) => {
@@ -202,12 +267,12 @@ export async function renderCompEdit(root: HTMLElement, slug: string | null) {
     });
     on("qualfrom", "change", (el) => (c.qualification!.from = text(el.value)));
     on("qualto", "change", (el) => (c.qualification!.to = text(el.value)));
-    on("qualcounts", "input", (el) => {
-      c.qualification!.counts = el.value
-        .split(",")
-        .map((s) => s.trim())
-        .filter((s) => s !== "");
-    });
+    bindOrgPicker(
+      "counts",
+      "multi",
+      () => c.qualification!.counts,
+      (v) => (c.qualification!.counts = v),
+    );
     root.querySelector("#addmark")?.addEventListener("click", () => {
       c.qualification!.standards.push(blankStandard(c));
       render();
@@ -298,6 +363,48 @@ function blankStandard(c: Competition): Standard {
   return { total: 0, label: "", age_group: c.age_group, category: c.category };
 }
 
+/**
+ * An organization field: a dropdown of organizations the app knows about,
+ * with a "+ New organization…" option that swaps in an add row rather than
+ * navigating away — the meet you are editing is exactly where a new
+ * organization is first needed, so this is where adding one belongs.
+ *
+ * `single` clears back to "— none —"; `multi` keeps chosen values as removable
+ * chips above the dropdown and offers only the ones not already chosen.
+ */
+function orgPicker(
+  fieldId: string,
+  mode: "single" | "multi",
+  values: string[],
+  organizations: string[],
+  addingOrgFor: string | null,
+): string {
+  if (addingOrgFor === fieldId) {
+    return `
+      <div class="org-add-row">
+        <input class="text-input" id="orgnew-${fieldId}" placeholder="Organization name" autofocus>
+        <button class="btn primary" data-orgconfirm="${fieldId}">Add</button>
+        <button class="btn" data-orgcancel="${fieldId}">Cancel</button>
+      </div>`;
+  }
+  const current = values[0] ?? "";
+  const avail = mode === "multi" ? organizations.filter((o) => !values.some((v) => v.toLowerCase() === o.toLowerCase())) : organizations;
+  const chips =
+    mode === "multi" && values.length
+      ? `<div class="chip-list">${values
+          .map((o, i) => `<span class="chip">${esc(o)}<button class="chip-remove" data-orgdel="${fieldId}:${i}">✕</button></span>`)
+          .join("")}</div>`
+      : "";
+  const placeholder = mode === "single" ? "— none —" : "+ add organization…";
+  return `
+    ${chips}
+    <select class="text-input" data-orgpick="${fieldId}">
+      <option value="" ${current ? "" : "selected"}>${placeholder}</option>
+      ${avail.map((o) => `<option value="${esc(o)}" ${o === current ? "selected" : ""}>${esc(o)}</option>`).join("")}
+      <option value="__new__">+ New organization…</option>
+    </select>`;
+}
+
 function field(label: string, input: string, hint?: string): string {
   return `
     <label class="comp-field">
@@ -356,7 +463,7 @@ function setResultLabel(btn: HTMLButtonElement, a: Attempt | null) {
   btn.className = `btn comp-result-btn ${a ? a.result : ""}`;
 }
 
-function qualSection(q: Qualification): string {
+function qualSection(q: Qualification, organizations: string[], addingOrgFor: string | null): string {
   const rows = q.standards
     .map(
       (s, i) => `
@@ -376,8 +483,8 @@ function qualSection(q: Qualification): string {
       ${field("until", `<input class="text-input" id="qualto" type="date" value="${esc(q.to ?? "")}">`)}
       ${field(
         "Meets that count",
-        `<input class="text-input" id="qualcounts" value="${esc(q.counts.join(", "))}" placeholder="BWL, IWF">`,
-        "Comma-separated federations. Leave empty and any meet counts.",
+        orgPicker("counts", "multi", q.counts, organizations, addingOrgFor),
+        "Leave empty and any meet counts.",
       )}
       <div class="comp-marks-head">
         <span class="quick-label">Marks</span>

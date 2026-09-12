@@ -10,6 +10,7 @@ use wltimer_core::days::{self, DayEntry, DayStatus, DayStore, DaySummary};
 use wltimer_core::engine::{Cue, Engine, Snapshot};
 use wltimer_core::ids;
 use wltimer_core::model::{Phase, Workout};
+use wltimer_core::orgs::OrgStore;
 use wltimer_core::parser::{self, ParseError};
 use wltimer_core::plan::{self, PatchCounts, Plan, PlanStore, PlanSummary};
 use wltimer_core::session::{RunOrigin, SavedSession, SessionStore};
@@ -21,6 +22,7 @@ pub struct AppState {
     pub days: DayStore,
     pub plans: PlanStore,
     pub comps: CompStore,
+    pub orgs: OrgStore,
     pub sessions: SessionStore,
     pub origin: Mutex<RunOrigin>,
 }
@@ -1299,4 +1301,21 @@ pub fn view_competition(state: State<AppState>, slug: String) -> Result<CompView
         marks,
         competition: c,
     })
+}
+
+// ---- organizations ----
+
+#[tauri::command]
+pub fn list_organizations(state: State<AppState>) -> Vec<String> {
+    state.orgs.list()
+}
+
+#[tauri::command]
+pub fn add_organization(state: State<AppState>, name: String) -> Result<Vec<String>, String> {
+    state.orgs.add(&name)
+}
+
+#[tauri::command]
+pub fn delete_organization(state: State<AppState>, name: String) -> Result<Vec<String>, String> {
+    state.orgs.delete(&name)
 }
