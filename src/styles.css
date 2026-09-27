@@ -1355,8 +1355,20 @@ a.ov-note {
 .comp-mark-state.out {
   color: #f87171;
 }
+/* Green is only ever "made": anything still to get is yellow, however good
+   the plan looks, and red is proved out of reach. */
 .comp-mark-state.open {
-  color: var(--muted);
+  color: #fbbf24;
+}
+.comp-mark.st-clinched {
+  box-shadow: inset 3px 0 0 #4ade80;
+}
+.comp-mark.st-needs,
+.comp-mark.st-open {
+  box-shadow: inset 3px 0 0 #fbbf24;
+}
+.comp-mark.st-out_of_reach {
+  box-shadow: inset 3px 0 0 #f87171;
 }
 .comp-mark.other {
   opacity: 0.6;
@@ -1567,21 +1579,12 @@ button.rc-attempt.empty {
 .comp-mark-reach {
   font-size: 0.8rem;
   width: 100%;
-  color: var(--muted);
-}
-.comp-mark-reach.clinch {
-  color: #4ade80;
-}
-.comp-mark-reach.short {
   color: #fbbf24;
 }
 .comp-goal {
   margin: -0.1rem 0 0.2rem 2rem;
   font-size: 0.8rem;
   color: #fbbf24;
-}
-.comp-goal.clinch {
-  color: #4ade80;
 }
 
 .rc-title {

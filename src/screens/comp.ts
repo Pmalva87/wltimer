@@ -13,6 +13,8 @@ import { esc } from "./library";
 
 /** One competition as a list row, shared by the Competitions screen. */
 export function compRow(c: CompSummary): string {
+  // A meet that no longer reads has no meet screen to delete it from, so its
+  // row is the one place Delete still sits; a readable one deletes from inside.
   if (c.error) {
     return `<div class="workout broken">
               <a class="info tappable" href="#/compedit/${encodeURIComponent(c.slug)}">
@@ -57,9 +59,6 @@ export function compRow(c: CompSummary): string {
               <span class="name">🏆 ${esc(c.name)}</span>
               <span class="meta">${bits.join(" · ")}</span>
             </a>
-            <div class="actions compact">
-              <button class="btn danger compdelete" data-slug="${esc(c.slug)}">🗑</button>
-            </div>
           </div>`;
 }
 
@@ -128,7 +127,7 @@ export function attemptGoals(view: CompView, lift: Lift, attempt: number, writte
     .map(({ label, status: s }) => {
       if (s.state !== "needs" || s.lift !== lift || s.attempt !== attempt) return "";
       if (written != null && written >= s.kg) {
-        return `<div class="comp-goal clinch">🎯 ${label} — make ${fmtKg(written)} and it is yours (needs ${fmtKg(s.kg)})</div>`;
+        return `<div class="comp-goal">🎯 ${label} — make ${fmtKg(written)} and it is yours (needs ${fmtKg(s.kg)})</div>`;
       }
       const gap = written != null ? ` — ${fmtKg(s.kg - written)} more than written` : "";
       return `<div class="comp-goal">🎯 ${label} — needs ${fmtKg(s.kg)}${gap}</div>`;
@@ -178,7 +177,7 @@ function markRow(
   groupText: string | null,
 ): string {
   return `
-    <div class="comp-mark">
+    <div class="comp-mark st-${status.state}">
       <span class="comp-mark-total">${fmtKg(total)}</span>
       <span class="comp-mark-label">${label}${groupText ? ` <span class="muted">${esc(groupText)}</span>` : ""}</span>
       ${statusText(status)}
@@ -197,7 +196,7 @@ function reachText(r: Reach, s: TargetStatus, started: boolean): string {
           : started
             ? `make your next lifts (${fmtKg(r.total)})`
             : `make your openers (${fmtKg(r.total)})`;
-      return `<span class="comp-mark-reach clinch">✓ clinched if you ${what}</span>`;
+      return `<span class="comp-mark-reach">reached if you ${what}</span>`;
     }
     case "plan":
       return `<span class="comp-mark-reach">needs more than your ${started ? "next lifts" : "openers"} — your plan gets it (${fmtKg(r.total)})</span>`;
@@ -219,7 +218,7 @@ function statusText(s: TargetStatus): string {
     default:
       // Both lifts still unfinished: what the bar needs depends on the other
       // one, so the target total is the only honest thing to show.
-      return `<span class="comp-mark-state open">still open</span>`;
+      return `<span class="comp-mark-state open">still possible</span>`;
   }
 }
 
