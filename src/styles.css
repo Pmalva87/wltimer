@@ -1552,7 +1552,16 @@ button.rc-attempt.empty {
 }
 .rc-reps {
   flex: 0 0 auto;
-  min-width: 3.5rem;
+  align-self: center;
+  min-width: 2.2rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.rc-rstep {
+  min-width: 2.4rem;
+}
+.rc-step:disabled {
+  opacity: 0.35;
 }
 .rc-res.on.planned,
 .rc-res.on.declared {

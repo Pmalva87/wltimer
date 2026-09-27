@@ -29,7 +29,7 @@ const LIFTS: [LiftKey, string][] = [
  *
  * Warmup follows the meet on its own: the next set not done is focused, with
  * its controls open under the chips, since ticking sets off is what warming
- * up *is*. An attempt opens its controls only when tapped — most of the time
+ * up *is* — until you tap it closed. An attempt opens its controls only when tapped — most of the time
  * spent on this screen is reading it, and a strip of buttons under an
  * attempt nobody asked about is noise.
  *
@@ -65,7 +65,8 @@ export async function renderMeet(root: HTMLElement, slugArg: string) {
   // landing mid-tap can never roll a stepper back.
   const c = view.competition;
   // `undefined` means "follow the meet"; a number is one you tapped.
-  const warmFocus: Record<LiftKey, number | undefined> = { snatch: undefined, clean_jerk: undefined };
+  // `null` is "closed": tapping the open set again puts its controls away.
+  const warmFocus: Record<LiftKey, number | null | undefined> = { snatch: undefined, clean_jerk: undefined };
   // No attempt is open until one is tapped.
   const attFocus: Record<LiftKey, number | undefined> = { snatch: undefined, clean_jerk: undefined };
   // Weight for an attempt slot not declared yet — nothing is written until
@@ -91,6 +92,7 @@ export async function renderMeet(root: HTMLElement, slugArg: string) {
 
   function currentWarm(k: LiftKey): number | null {
     const f = warmFocus[k];
+    if (f === null) return null;
     if (f !== undefined && f < liftOf(k).warmup.length) return f;
     const i = liftOf(k).warmup.findIndex((w) => !w.done);
     return i < 0 ? null : i;
@@ -385,7 +387,11 @@ export async function renderMeet(root: HTMLElement, slugArg: string) {
               <div class="rc-strip">
                 ${stepper(k, "warmkg", wf, w.kg, [-5, -1, 1, 5])}
                 <div class="rc-row">
-                  <button class="btn rc-reps" data-act="reps" data-lift="${k}" data-i="${wf}">× ${w.reps}</button>
+                  <button class="btn rc-step rc-rstep" data-act="reps" data-d="-1" data-lift="${k}" data-i="${wf}" ${
+                    w.reps <= 1 ? "disabled" : ""
+                  }>−</button>
+                  <span class="rc-reps">× ${w.reps}</span>
+                  <button class="btn rc-step rc-rstep" data-act="reps" data-d="1" data-lift="${k}" data-i="${wf}">+</button>
                   <button class="btn ${w.done ? "" : "primary"} rc-grow" data-act="done" data-lift="${k}" data-i="${wf}">${
                     w.done ? "↺ Not done" : "✓ Done"
                   }</button>
@@ -599,15 +605,10 @@ export async function renderMeet(root: HTMLElement, slugArg: string) {
         changed();
         break;
       case "warm":
-        // A second tap on the focused set is the shortcut for Done.
-        if (currentWarm(k) === i) {
-          toggleWarmDone(k, i);
-          warmFocus[k] = undefined;
-          changed();
-        } else {
-          warmFocus[k] = i;
-          render();
-        }
+        // Tapping the open set closes it, as an attempt does; Done is its own
+        // button, so a tap that only meant to look never ticks a set off.
+        warmFocus[k] = currentWarm(k) === i ? null : i;
+        render();
         break;
       case "done":
         toggleWarmDone(k, i);
@@ -620,8 +621,8 @@ export async function renderMeet(root: HTMLElement, slugArg: string) {
         changed();
         break;
       case "reps":
-        // 1 → 5 and round again: more than five is not a competition warmup.
-        entry!.warmup[i].reps = (entry!.warmup[i].reps % 5) + 1;
+        // Never below one: a set of none is a set to delete, which ✕ is for.
+        entry!.warmup[i].reps = Math.max(1, entry!.warmup[i].reps + d);
         warmFocus[k] = i;
         changed();
         break;
