@@ -148,7 +148,7 @@ export async function renderMeet(root: HTMLElement, slugArg: string) {
     const registered = effectiveRegistered(c);
     const chips = [
       chip("date", c.date ? `📅 ${fmtDay(c.date)}` : null, "+ date"),
-      chip("organizer", c.organizer ? `organized by ${esc(c.organizer)}` : null, "+ organizer"),
+      chip("organizer", c.organizer ? `🏛 ${esc(c.organizer)}` : null, "+ federation"),
       chip("orgs", c.orgs.length ? esc(c.orgs.join(" · ")) : null, "+ sanctioned by"),
       chip("category", c.category ? esc(c.category) : null, "+ weight class"),
       chip("age", c.age_group ? esc(c.age_group) : null, "+ age group"),

@@ -221,11 +221,14 @@ pub struct Competition {
     /// Portugal can be the thing that qualifies you for something in England.
     #[serde(default)]
     pub orgs: Vec<String>,
-    /// Who is running the meet — a club, a federation, a promoter. Distinct
-    /// from `orgs`: a national championships can be organized by one
-    /// federation and still count for others' qualifying windows. Free text
-    /// for the same reason `orgs` is; [`crate::orgs::OrgStore`] only supplies
-    /// a picker's suggestions, not a closed list.
+    /// The federation the meet belongs to — shown as "Federation", and not
+    /// necessarily who runs it on the day: a world championships is the IWF's
+    /// wherever it is hosted. Written `organizer` in the file, which every
+    /// document already uses — `federation` is taken, as a spelling of the
+    /// sanctioning list. Distinct
+    /// from `orgs`, which says which qualifying windows a total here counts
+    /// for. Free text for the same reason `orgs` is; [`crate::orgs::OrgStore`]
+    /// only supplies a picker's suggestions, not a closed list.
     #[serde(default)]
     pub organizer: Option<String>,
     /// The age group entered — `M40`, `40-44`, `Senior`. On a meet you have

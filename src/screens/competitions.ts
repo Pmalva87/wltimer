@@ -25,8 +25,8 @@ export async function renderCompetitions(root: HTMLElement) {
             <h2>Organizations</h2>
           </div>
           <div class="empty small">
-            Federations, clubs and promoters to pick from when you set who
-            organizes or sanctions a meet.
+            Federations, clubs and promoters to pick from when you set whose
+            meet it is or who sanctions it.
           </div>
           ${
             organizations.length

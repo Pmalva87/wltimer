@@ -26,10 +26,11 @@ export function compRow(c: CompSummary): string {
               </div>
             </div>`;
   }
+  // Whose meet it is, not who else sanctions it: the sanctioning list is for
+  // working out which marks a total counts towards, and it lives on the meet.
   const bits = [
     c.date ?? "no date",
-    ...(c.organizer ? [`by ${esc(c.organizer)}`] : []),
-    ...(c.orgs.length ? [esc(c.orgs.join(" · "))] : []),
+    ...(c.organizer ? [`🏛 ${esc(c.organizer)}`] : []),
     ...(c.age_group || c.category ? [esc([c.age_group, c.category].filter(Boolean).join(" "))] : []),
   ];
   // The two kinds of row a competition list holds: one you lifted at, and one

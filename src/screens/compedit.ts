@@ -57,7 +57,11 @@ export async function renderCompEdit(root: HTMLElement, slug: string | null) {
           <section class="comp-fields">
             ${field("Name", `<input class="text-input" id="name" value="${esc(c.name)}" placeholder="Portuguese Nationals 2027">`)}
             ${field("Date", `<input class="text-input" id="date" type="date" value="${esc(c.date ?? "")}">`)}
-            ${field("Organizer", orgPicker("organizer", "single", c.organizer ? [c.organizer] : [], orgs), "Who is running the meet.")}
+            ${field(
+              "Federation",
+              orgPicker("organizer", "single", c.organizer ? [c.organizer] : [], orgs),
+              "The federation the competition belongs to — not necessarily who runs it on the day.",
+            )}
             ${field(
               "Sanctioned by",
               orgPicker("orgs", "multi", c.orgs, orgs),
