@@ -1410,7 +1410,7 @@ Brace hard.
 
     #[test]
     fn merge_keeps_an_entry_edited_since_the_plan_last_changed() {
-        let (_, plan) = saved_plan("edited");
+        let (_, plan) = saved_plan("edited-since");
         let mut cal = calendar(&plan, "531-cycle-1");
         // Edited on the calendar after the plan was written.
         let entry = &mut cal.get_mut("2026-07-30").unwrap()[0];
