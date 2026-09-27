@@ -482,7 +482,7 @@ impl Competition {
     /// Like [`Self::best_possible_total`], but a lift closed by the order of
     /// the meet counts only what it made: a snatch still written as declared
     /// once the clean & jerk has begun is a plan that did not happen.
-    fn plan_total(&self) -> Option<f64> {
+    pub fn plan_total(&self) -> Option<f64> {
         self.projected(|e| e.best_possible())
     }
 
@@ -1898,6 +1898,19 @@ Openers felt fast.
         );
         assert_eq!(c.next_total(), Some(204.0));
         assert_eq!(c.reach(210.0), Some(Reach::Short { total: 204.0, kg: 6.0 }));
+    }
+
+    #[test]
+    fn a_finished_meet_projects_nothing_past_its_total() {
+        // A third snatch left declared once the clean & jerk began is a lift
+        // that never happened, not one still to come.
+        let c = comp(
+            [made(90.0), missed(94.0), declared(94.0)],
+            [made(110.0), made(114.0), missed(117.0)],
+        );
+        assert_eq!(c.total().kg(), Some(204.0));
+        assert_eq!(c.next_total(), Some(204.0));
+        assert_eq!(c.plan_total(), Some(204.0));
     }
 
     #[test]

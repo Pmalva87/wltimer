@@ -27,11 +27,9 @@ const LIFTS: [LiftKey, string][] = [
  * no typing on the way to the common actions: between lifts you have one hand
  * and a few seconds.
  *
- * Warmup follows the meet on its own: the next set not done is focused, with
- * its controls open under the chips, since ticking sets off is what warming
- * up *is* — until you tap it closed. An attempt opens its controls only when tapped — most of the time
- * spent on this screen is reading it, and a strip of buttons under an
- * attempt nobody asked about is noise.
+ * Nothing is open until it is tapped — a warmup set or an attempt, one per
+ * lift. Most of the time spent on this screen is reading it, and a strip of
+ * buttons under a set nobody asked about is noise.
  *
  * The meet's own details — name, date, who runs and sanctions it, the class
  * and group you entered, the entry standard — work the same way: each is a
@@ -65,9 +63,8 @@ export async function renderMeet(root: HTMLElement, slugArg: string) {
   // landing mid-tap can never roll a stepper back.
   const c = view.competition;
   // `undefined` means "follow the meet"; a number is one you tapped.
-  // `null` is "closed": tapping the open set again puts its controls away.
-  const warmFocus: Record<LiftKey, number | null | undefined> = { snatch: undefined, clean_jerk: undefined };
-  // No attempt is open until one is tapped.
+  // The warmup set and attempt whose controls are open, per lift — none until tapped.
+  const warmFocus: Record<LiftKey, number | undefined> = { snatch: undefined, clean_jerk: undefined };
   const attFocus: Record<LiftKey, number | undefined> = { snatch: undefined, clean_jerk: undefined };
   // Weight for an attempt slot not declared yet — nothing is written until
   // one of its buttons says what it is.
@@ -92,10 +89,7 @@ export async function renderMeet(root: HTMLElement, slugArg: string) {
 
   function currentWarm(k: LiftKey): number | null {
     const f = warmFocus[k];
-    if (f === null) return null;
-    if (f !== undefined && f < liftOf(k).warmup.length) return f;
-    const i = liftOf(k).warmup.findIndex((w) => !w.done);
-    return i < 0 ? null : i;
+    return f !== undefined && f < liftOf(k).warmup.length ? f : null;
   }
 
   function currentAtt(k: LiftKey): number | null {
@@ -607,11 +601,12 @@ export async function renderMeet(root: HTMLElement, slugArg: string) {
       case "warm":
         // Tapping the open set closes it, as an attempt does; Done is its own
         // button, so a tap that only meant to look never ticks a set off.
-        warmFocus[k] = currentWarm(k) === i ? null : i;
+        warmFocus[k] = currentWarm(k) === i ? undefined : i;
         render();
         break;
       case "done":
         toggleWarmDone(k, i);
+        // Ticked off closes it, the way a result closes an attempt.
         warmFocus[k] = entry!.warmup[i].done ? undefined : i;
         changed();
         break;

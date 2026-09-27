@@ -84,14 +84,22 @@ function started(view: CompView): boolean {
 
 export function totalPanel(view: CompView): string {
   const notes: string[] = [];
-  if (view.next_total != null && view.total.state !== "bombed_out") {
+  // A projection that lands on the total already made says nothing: the
+  // meet is over, or nothing heavier is written. Only a number still to lift
+  // earns a line.
+  const made = view.total.state === "made" ? view.total.total : null;
+  if (view.next_total != null && view.total.state !== "bombed_out" && view.next_total !== made) {
     notes.push(
       started(view)
         ? `${fmtKg(view.next_total)} if you make your next lifts`
         : `${fmtKg(view.next_total)} with your openers`,
     );
   }
-  if (view.best_possible_total != null && view.best_possible_total !== view.next_total) {
+  if (
+    view.best_possible_total != null &&
+    view.best_possible_total !== view.next_total &&
+    view.best_possible_total !== made
+  ) {
     notes.push(
       view.total.state === "made"
         ? `best possible ${fmtKg(view.best_possible_total)}`

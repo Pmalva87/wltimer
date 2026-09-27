@@ -1288,7 +1288,9 @@ pub fn view_competition(state: State<AppState>, slug: String) -> Result<CompView
         slug,
         registered: c.registered(),
         total: c.total(),
-        best_possible_total: c.best_possible_total(),
+        // Closed lifts count only what they made: a snatch left declared once
+        // the clean & jerk began is not a total anyone can still lift.
+        best_possible_total: c.plan_total(),
         next_total: c.next_total(),
         snatch_best: c.snatch.best(),
         clean_jerk_best: c.clean_jerk.best(),
