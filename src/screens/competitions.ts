@@ -12,6 +12,9 @@ import { tabBar } from "../tabs";
 export async function renderCompetitions(root: HTMLElement) {
   const comps: CompSummary[] = await api.listCompetitions();
   let organizations: string[] = await api.listOrganizations();
+  // A name a meet uses is offered from the meet itself, so it has no ✕ here:
+  // deleting it would only bring it straight back.
+  const inUse = new Set((await api.organizationsInUse()).map((n) => n.toLowerCase()));
 
   function render() {
     root.innerHTML = `
@@ -26,14 +29,17 @@ export async function renderCompetitions(root: HTMLElement) {
           </div>
           <div class="empty small">
             Federations, clubs and promoters to pick from when you set whose
-            meet it is or who sanctions it.
+            meet it is or who sanctions it. Every one your meets name is here
+            already; the ones without ✕ are in use by a meet.
           </div>
           ${
             organizations.length
               ? `<div class="chip-list">${organizations
                   .map(
                     (o) =>
-                      `<span class="chip">${esc(o)}<button class="chip-remove" data-orgdel="${esc(o)}" title="Delete">✕</button></span>`,
+                      inUse.has(o.toLowerCase())
+                        ? `<span class="chip" title="Used by a meet">${esc(o)}</span>`
+                        : `<span class="chip">${esc(o)}<button class="chip-remove" data-orgdel="${esc(o)}" title="Delete">✕</button></span>`,
                   )
                   .join("")}</div>`
               : ""

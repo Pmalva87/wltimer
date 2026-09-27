@@ -71,6 +71,7 @@ pub fn run() {
             commands::list_organizations,
             commands::add_organization,
             commands::delete_organization,
+            commands::organizations_in_use,
             commands::export_bundle,
             commands::parse_bundle_preview,
             commands::import_bundle,

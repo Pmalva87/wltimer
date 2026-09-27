@@ -10,7 +10,7 @@ use wltimer_core::days::{self, DayEntry, DayStatus, DayStore, DaySummary};
 use wltimer_core::engine::{Cue, Engine, Snapshot};
 use wltimer_core::ids;
 use wltimer_core::model::{Phase, Workout};
-use wltimer_core::orgs::OrgStore;
+use wltimer_core::orgs::{self, OrgStore};
 use wltimer_core::parser::{self, ParseError};
 use wltimer_core::plan::{self, PatchCounts, Plan, PlanStore, PlanSummary};
 use wltimer_core::session::{RunOrigin, SavedSession, SessionStore};
@@ -1316,15 +1316,24 @@ pub fn view_competition(state: State<AppState>, slug: String) -> Result<CompView
 
 #[tauri::command]
 pub fn list_organizations(state: State<AppState>) -> Vec<String> {
-    state.orgs.list()
+    state.orgs.list_with(&state.comps.all())
+}
+
+/// The names some meet uses — the ones deleting from the list cannot remove,
+/// since the meet would offer them straight back.
+#[tauri::command]
+pub fn organizations_in_use(state: State<AppState>) -> Vec<String> {
+    orgs::named_by(&state.comps.all())
 }
 
 #[tauri::command]
 pub fn add_organization(state: State<AppState>, name: String) -> Result<Vec<String>, String> {
-    state.orgs.add(&name)
+    state.orgs.add(&name)?;
+    Ok(list_organizations(state))
 }
 
 #[tauri::command]
 pub fn delete_organization(state: State<AppState>, name: String) -> Result<Vec<String>, String> {
-    state.orgs.delete(&name)
+    state.orgs.delete(&name)?;
+    Ok(list_organizations(state))
 }

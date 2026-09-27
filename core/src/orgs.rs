@@ -12,8 +12,12 @@
 //!
 //! A single JSON blob, in the style of [`crate::session::SessionStore`]:
 //! there is nothing here worth a document of its own, so no id and no
-//! `updated` stamp, and no place in a backup bundle.
+//! `updated` stamp, and no place in a backup bundle. What the picker offers is
+//! this list *and* every name the stored meets use ([`named_by`]) — which is
+//! how the suggestions come back after a restore without a second copy of
+//! them in the backup: the meets already carry them.
 
+use crate::comp::Competition;
 use crate::zio;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -79,6 +83,37 @@ impl OrgStore {
         self.write(&list)?;
         Ok(self.list())
     }
+
+    /// What a picker offers: the names kept here, plus every one `comps`
+    /// use, once each whatever the case, alphabetically. A kept spelling wins
+    /// over a meet's, since keeping it was a choice.
+    pub fn list_with(&self, comps: &[Competition]) -> Vec<String> {
+        let mut names = self.list();
+        for n in named_by(comps) {
+            if !names.iter().any(|k| k.eq_ignore_ascii_case(&n)) {
+                names.push(n);
+            }
+        }
+        names.sort_by_key(|n| n.to_lowercase());
+        names
+    }
+}
+
+/// Every organization a meet names: whose meet it is, who sanctions it, and
+/// which bodies' meets count toward its standard. Once each, first spelling
+/// seen, in no particular order.
+pub fn named_by(comps: &[Competition]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for c in comps {
+        let counts = c.qualification.iter().flat_map(|q| q.counts.iter());
+        for n in c.organizer.iter().chain(c.orgs.iter()).chain(counts) {
+            let n = n.trim();
+            if !n.is_empty() && !out.iter().any(|o| o.eq_ignore_ascii_case(n)) {
+                out.push(n.to_string());
+            }
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -89,6 +124,22 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("wltimer-orgs-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         OrgStore::new(dir).unwrap()
+    }
+
+    #[test]
+    fn a_picker_offers_the_names_meets_use_as_well() {
+        let s = temp_store("a_picker_offers_the_names_meets_use_as_well");
+        s.add("BWL").unwrap();
+        let mut meet = Competition::new("Nationals");
+        meet.organizer = Some("FPH".into());
+        meet.orgs = vec!["bwl".into(), "IWF".into()];
+        meet.qualification = Some(crate::comp::Qualification {
+            counts: vec!["EWF".into()],
+            ..Default::default()
+        });
+        assert_eq!(s.list_with(&[meet]), vec!["BWL", "EWF", "FPH", "IWF"]);
+        // Only what was added is kept: the rest is read off the meets.
+        assert_eq!(s.list(), vec!["BWL"]);
     }
 
     #[test]

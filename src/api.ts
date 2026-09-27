@@ -538,6 +538,7 @@ export const api = {
   listOrganizations: () => invoke<string[]>("list_organizations"),
   addOrganization: (name: string) => invoke<string[]>("add_organization", { name }),
   deleteOrganization: (name: string) => invoke<string[]>("delete_organization", { name }),
+  organizationsInUse: () => invoke<string[]>("organizations_in_use"),
   /** The whole library, plans and calendar as one markdown document. */
   exportBundle: () => invoke<string>("export_bundle"),
   parseBundlePreview: (source: string) =>
