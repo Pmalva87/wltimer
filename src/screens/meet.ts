@@ -606,8 +606,14 @@ export async function renderMeet(root: HTMLElement, slugArg: string) {
         break;
       case "done":
         toggleWarmDone(k, i);
-        // Ticked off closes it, the way a result closes an attempt.
-        warmFocus[k] = entry!.warmup[i].done ? undefined : i;
+        // Ticked off moves on to the next set still to do — the one you are
+        // about to load — or closes when there is none. Undoing stays put.
+        if (entry!.warmup[i].done) {
+          const next = entry!.warmup.findIndex((w, j) => j > i && !w.done);
+          warmFocus[k] = next < 0 ? undefined : next;
+        } else {
+          warmFocus[k] = i;
+        }
         changed();
         break;
       case "warmkg":
