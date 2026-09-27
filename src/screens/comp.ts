@@ -1,14 +1,11 @@
 import {
-  api,
   fmtKg,
   type CompSummary,
   type CompView,
-  type LiftEntry,
   type Lift,
   type MarkView,
   type Qualification,
   type Reach,
-  type StandardView,
   type TargetStatus,
   type TotalState,
 } from "../api";
@@ -42,7 +39,14 @@ export function compRow(c: CompSummary): string {
   } else if (c.attempts_taken > 0) {
     bits.push(`${c.attempts_taken} attempt${c.attempts_taken === 1 ? "" : "s"} in`);
   }
-  if (c.standards > 0) {
+  if (c.qualified) {
+    // Met is met: what is left worth saying is by how much, and where.
+    bits.push(
+      `<span class="meta-ok">✓ qualified — best ${fmtKg(c.qualified.total)} at ${esc(c.qualified.meet)}${
+        c.qualified.date ? ` (${fmtDay(c.qualified.date)})` : ""
+      }</span>`,
+    );
+  } else if (c.standards > 0) {
     bits.push(`🎯 ${c.standards} mark${c.standards === 1 ? "" : "s"} to get in`);
   }
   if (!c.registered) {
@@ -54,73 +58,12 @@ export function compRow(c: CompSummary): string {
               <span class="meta">${bits.join(" · ")}</span>
             </a>
             <div class="actions compact">
-              <a class="btn primary" href="#/runcomp/${encodeURIComponent(c.slug)}">▶ Run</a>
-              <a class="btn" href="#/comp/${encodeURIComponent(c.slug)}">👁 View</a>
-              <a class="btn" href="#/compedit/${encodeURIComponent(c.slug)}">✎ Edit</a>
               <button class="btn danger compdelete" data-slug="${esc(c.slug)}">🗑</button>
             </div>
           </div>`;
 }
 
-/**
- * A competition, read-only. Everything on this screen is either written in the
- * document or computed from it — what the meet totals, what it could still
- * total, and which qualifying marks it is able to answer.
- */
-export async function renderComp(root: HTMLElement, slug: string) {
-  let view: CompView;
-  try {
-    view = await api.viewCompetition(slug);
-  } catch (e) {
-    root.innerHTML = `
-      <div class="screen viewer">
-        <header class="topbar">
-          <a class="btn" href="#/library">‹ Back</a>
-          <h1>Cannot show competition</h1>
-          <a class="btn primary" href="#/compedit/${encodeURIComponent(slug)}">Edit</a>
-        </header>
-        <div class="view-scroll"><div class="editor-status invalid">${esc(String(e))}</div></div>
-      </div>`;
-    return;
-  }
-
-  const c = view.competition;
-  const meta = [
-    c.date ? `📅 ${fmtDay(c.date)}` : null,
-    c.organizer ? `organized by ${esc(c.organizer)}` : null,
-    c.orgs.length ? esc(c.orgs.join(" · ")) : null,
-    c.category ? esc(c.category) : null,
-    c.age_group ? esc(c.age_group) : null,
-    c.bodyweight != null ? `${fmtKg(c.bodyweight)} kg bw` : null,
-    view.registered ? null : `<span class="meta-warn">⚠ not registered</span>`,
-  ].filter(Boolean);
-
-  root.innerHTML = `
-    <div class="screen viewer">
-      <header class="topbar">
-        <a class="btn" href="#/library">‹ Back</a>
-        <a class="btn" href="#/runcomp/${encodeURIComponent(slug)}">▶ Run</a>
-        <a class="btn primary" href="#/compedit/${encodeURIComponent(slug)}">Edit</a>
-      </header>
-      <div class="view-scroll">
-        <h1 class="view-title">🏆 ${esc(c.name)}</h1>
-        ${meta.length ? `<div class="comp-meta">${meta.map((m) => `<span>${m}</span>`).join("")}</div>` : ""}
-        ${standardsSection(view.standards, c.age_group, c.category, c.qualification)}
-        ${totalPanel(view)}
-        ${hasData(c.snatch) ? liftCard(view, "snatch", "Snatch", c.snatch, view.snatch_best, view.snatch_going_down, view.snatch_notes_html) : ""}
-        ${hasData(c.clean_jerk) ? liftCard(view, "clean_jerk", "Clean & Jerk", c.clean_jerk, view.clean_jerk_best, view.clean_jerk_going_down, view.clean_jerk_notes_html) : ""}
-        ${targetsSection(view)}
-        ${marksSection(view)}
-      </div>
-    </div>`;
-}
-
-/** Is there anything on this lift worth a card — an attempt, or a warmup? */
-function hasData(entry: LiftEntry): boolean {
-  return entry.attempts.some((a) => a !== null) || entry.warmup.length > 0;
-}
-
-/** Totals to chase today, shared with the Run screen. */
+/** Totals to chase today. */
 export function targetsSection(view: CompView): string {
   if (view.targets.length === 0) return "";
   return `
@@ -193,62 +136,6 @@ export function attemptGoals(view: CompView, lift: Lift, attempt: number, writte
     .join("");
 }
 
-function liftCard(
-  view: CompView,
-  lift: Lift,
-  name: string,
-  entry: LiftEntry,
-  best: number | null,
-  goingDown: number[],
-  notesHtml: string,
-): string {
-  const attempts = entry.attempts
-    .map((a, i) => {
-      const n = i + 1;
-      if (!a) {
-        return `<div class="comp-attempt empty"><span class="comp-attempt-n">${n}</span><span class="comp-attempt-kg">—</span></div>${attemptGoals(
-          view,
-          lift,
-          n,
-          null,
-        )}`;
-      }
-      const mark =
-        a.result === "good"
-          ? `<span class="comp-result good">✓ good lift</span>`
-          : a.result === "miss"
-            ? `<span class="comp-result miss">✗ no lift</span>`
-            : `<span class="comp-result declared">${a.result}</span>`;
-      const warn = goingDown.includes(n) ? `<span class="meta-warn">⚠ lighter than the one before</span>` : "";
-      return `<div class="comp-attempt ${a.result}">
-                <span class="comp-attempt-n">${n}</span>
-                <span class="comp-attempt-kg">${fmtKg(a.kg)}</span>
-                ${mark}${warn}
-              </div>${attemptGoals(view, lift, n, a.kg)}`;
-    })
-    .join("");
-  const warmup = entry.warmup.length
-    ? `<div class="comp-warmup">${entry.warmup
-        .map(
-          (w) =>
-            `<span class="comp-set ${w.done ? "done" : ""}">${w.done ? "✓" : "○"} ${fmtKg(w.kg)}${
-              w.reps > 1 ? ` × ${w.reps}` : ""
-            }</span>`,
-        )
-        .join("")}</div>`
-    : "";
-  return `
-    <section class="view-part">
-      <div class="view-part-head">
-        <h2>${name}</h2>
-        <span class="view-part-total">${best != null ? `best ${fmtKg(best)}` : "—"}</span>
-      </div>
-      ${warmup}
-      <div class="comp-attempts">${attempts}</div>
-      ${notesHtml ? `<div class="view-notes">${notesHtml}</div>` : ""}
-    </section>`;
-}
-
 /** Qualifying marks at other meets that a total here could still win. */
 export function marksSection(view: CompView): string {
   if (view.marks.length === 0) return "";
@@ -273,46 +160,12 @@ export function marksSection(view: CompView): string {
     </section>`;
 }
 
-/** This meet's own entry standards, and what has already answered them. */
 /** `from`/`to` as a reader-facing range — either end may be open. */
-function windowText(q: Qualification): string | null {
+export function windowText(q: Qualification): string | null {
   if (!q.from && !q.to) return null;
   if (q.from && q.to) return `Results from ${fmtDay(q.from)} to ${fmtDay(q.to)} count`;
   if (q.from) return `Results from ${fmtDay(q.from)} on count`;
   return `Results up to ${fmtDay(q.to!)} count`;
-}
-
-export function standardsSection(
-  standards: StandardView[],
-  ageGroup: string | null,
-  category: string | null,
-  qualification: Qualification | null,
-): string {
-  if (standards.length === 0) return "";
-  const said = ageGroup || category;
-  const window = qualification ? windowText(qualification) : null;
-  return `
-    <section class="view-part">
-      <div class="view-part-head"><h2>Entry standard</h2></div>
-      ${window ? `<div class="comp-hint">🗓 ${window}</div>` : ""}
-      ${standards
-        .map((s) => {
-          const label = [group(s.age_group, s.category), s.label].filter(Boolean).join(" · ");
-          const met = s.met_by
-            ? `<span class="comp-mark-state clinched">✓ ${fmtKg(s.met_total ?? 0)} at ${esc(s.met_by)}${
-                s.met_on ? ` (${fmtDay(s.met_on)})` : ""
-              }${s.met_category ? ` · ${esc(s.met_category)}` : ""}</span>`
-            : `<span class="comp-mark-state open">not yet</span>`;
-          return `<div class="comp-mark ${s.yours ? "yours" : "other"}">
-                    <span class="comp-mark-total">${fmtKg(s.total)}</span>
-                    <span class="comp-mark-label">${esc(label) || "everyone"}${
-                      said && s.yours ? ` <span class="comp-yours">yours</span>` : ""
-                    }</span>
-                    ${met}
-                  </div>`;
-        })
-        .join("")}
-    </section>`;
 }
 
 /** `label` arrives as HTML — every caller escapes its own text. */
@@ -370,7 +223,7 @@ function statusText(s: TargetStatus): string {
   }
 }
 
-function group(ageGroup: string | null, category: string | null): string | null {
+export function group(ageGroup: string | null, category: string | null): string | null {
   const parts = [ageGroup, category].filter(Boolean);
   return parts.length ? parts.join(" ") : null;
 }

@@ -1405,45 +1405,15 @@ a.ov-note {
   justify-content: space-between;
   gap: 0.5rem;
 }
-.comp-edit-attempts {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  margin-bottom: 0.75rem;
-}
-.comp-edit-attempt,
-.comp-edit-set,
 .comp-edit-mark {
   display: flex;
   align-items: center;
   gap: 0.35rem;
   margin-bottom: 0.3rem;
 }
-.comp-edit-attempt .text-input,
-.comp-edit-set .text-input,
 .comp-edit-mark .text-input {
   flex: 1 1 3rem;
   min-width: 0;
-}
-.comp-result-btn {
-  flex: 0 0 auto;
-  min-width: 6rem;
-}
-.comp-result-btn.good {
-  color: #4ade80;
-}
-.comp-result-btn.miss {
-  color: #f87171;
-}
-.comp-result-btn.readonly {
-  cursor: default;
-  opacity: 0.75;
-}
-.comp-tick.done {
-  color: #4ade80;
-}
-.comp-x {
-  color: var(--muted);
 }
 .comp-danger {
   margin: 1.5rem 0 0.5rem;
@@ -1493,6 +1463,7 @@ a.ov-note {
 /* ---- competition run screen ---- */
 
 .rc-save {
+  flex: 1;
   font-size: 0.8rem;
   color: var(--muted);
   max-width: 40%;
@@ -1611,4 +1582,70 @@ button.rc-attempt.empty {
 }
 .comp-goal.clinch {
   color: #4ade80;
+}
+
+.rc-title {
+  display: block;
+  width: 100%;
+  margin-bottom: 0.4rem;
+  padding: 0.2rem 0.3rem;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.rc-title.focus {
+  border-color: var(--accent);
+}
+.rc-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0.25rem 0 0.5rem;
+}
+.rc-meta-chip {
+  border-radius: 999px;
+  background: #00000030;
+  color: var(--muted);
+  font-size: 0.85rem;
+  padding: 0.3rem 0.65rem;
+}
+.rc-meta-chip.warn {
+  color: #fbbf24;
+}
+.rc-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+.rc-done {
+  flex: 0 0 auto;
+  align-self: flex-start;
+}
+button.rc-mark {
+  width: 100%;
+  border: 1px solid transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.rc-mark.focus {
+  border-color: var(--accent);
+}
+
+.meta-ok {
+  color: #4ade80;
+}
+.comp-qualified {
+  margin-bottom: 0.5rem;
+  padding: 0.5rem 0.7rem;
+  border-radius: 8px;
+  background: #16653455;
+  color: #4ade80;
+  font-weight: 600;
 }

@@ -704,8 +704,11 @@ impl Qualification {
         self.applicable(age_group, category).first().copied()
     }
 
-    /// The meet that already satisfies `standard`, if one does — the first in
-    /// `results` that both counts and totals enough.
+    /// The meet that already satisfies `standard`, if one does: the best
+    /// total among the `results` that count, when it is enough. The best
+    /// rather than the first, because once a mark is met the question stops
+    /// being "am I in" and becomes "by how much" — and the best total in the
+    /// window is the one an entry list is seeded from.
     ///
     /// The row's own age group and category are deliberately *not* required of
     /// the result. A qualifying window is long enough to age up inside, and
@@ -713,10 +716,22 @@ impl Qualification {
     /// differently. The meet that comes back carries its own group, so the
     /// screen can show where the total was set and let its lifter judge.
     pub fn met_by<'a>(&self, standard: &Standard, results: &'a [Competition]) -> Option<&'a Competition> {
+        self.best_result(results)
+            .filter(|m| m.total().kg().is_some_and(|t| t >= standard.total))
+    }
+
+    /// The heaviest total set at a meet that counts — the earlier one when two
+    /// tie, since that is the date the mark was first in hand.
+    pub fn best_result<'a>(&self, results: &'a [Competition]) -> Option<&'a Competition> {
         results
             .iter()
             .filter(|m| self.accepts(m))
-            .find(|m| m.total().kg().is_some_and(|t| t >= standard.total))
+            .filter_map(|m| m.total().kg().map(|t| (m, t)))
+            .fold(None, |best: Option<(&Competition, f64)>, (m, t)| match best {
+                Some((b, bt)) if bt > t || (bt == t && b.date <= m.date) => Some((b, bt)),
+                _ => Some((m, t)),
+            })
+            .map(|(m, _)| m)
     }
 }
 
@@ -1963,6 +1978,21 @@ Openers felt fast.
             Some("2026-07-04".into())
         );
         assert!(q.met_by(standard, &[too_light]).is_none());
+    }
+
+    #[test]
+    fn a_met_mark_is_answered_by_the_best_total_in_the_window() {
+        let q = window("2026-01-01", "2026-10-31", &["IWF"], 250.0);
+        let standard = &q.standards[0];
+        let first = result("2026-03-01", "IWF", 112.0, 140.0);
+        let best = result("2026-06-01", "IWF", 115.0, 145.0);
+        let tie_later = result("2026-08-01", "IWF", 116.0, 144.0);
+        let outside = result("2026-12-01", "IWF", 130.0, 160.0);
+        let results = vec![first, tie_later, best, outside];
+        assert_eq!(
+            q.met_by(standard, &results).and_then(|m| m.date.clone()),
+            Some("2026-06-01".into())
+        );
     }
 
     #[test]

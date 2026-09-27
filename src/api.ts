@@ -249,6 +249,8 @@ export interface CompSummary {
   total: TotalState;
   attempts_taken: number;
   standards: number;
+  /** Your mark here is already met — the best total in its window. */
+  qualified: { total: number; meet: string; date: string | null; category: string | null } | null;
   error: string | null;
 }
 
@@ -336,16 +338,6 @@ export function newCompetition(name: string, date: string | null): Competition {
  *  ask for the computed value, so it works it out the same way here. */
 export function effectiveRegistered(c: Competition): boolean {
   return c.registered_override ?? (!c.qualification || c.qualification.standards.length === 0);
-}
-
-/** A meet whose date has already passed. Undated or upcoming meets are not —
- *  a meet you have not pinned a date to is still one you are planning for,
- *  not one you are recording. This is what tells the editor whether declaring
- *  an attempt's weight is all you get, or whether you may also say how it
- *  went — recording results ahead of the fact belongs to the Run screen, on
- *  the day, or to fixing up a meet that has already happened. */
-export function isPastCompetition(c: Competition): boolean {
-  return c.date !== null && c.date < todayStr();
 }
 
 /**

@@ -36,8 +36,50 @@ pub struct CompSummary {
     pub attempts_taken: usize,
     /// How many qualifying marks this meet asks for, if it is one you chase.
     pub standards: usize,
+    /// Your mark here is already met: the best total in its window that
+    /// counts, and where. `None` while it is still to get, and on a meet with
+    /// no standard.
+    pub qualified: Option<QualifiedBy>,
     /// Set when the stored file no longer parses (e.g. edited externally).
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct QualifiedBy {
+    pub total: f64,
+    pub meet: String,
+    pub date: Option<String>,
+    pub category: Option<String>,
+}
+
+/// Whether `c`'s own entry standard is already met by one of `all`. "Yours"
+/// is the narrowest row for the group `c` says you are entering. With no
+/// group said, only a table of one row can answer — any other row being met
+/// could be someone else's number, and a tick on the list is a claim.
+fn qualified(c: &Competition, all: &[Competition]) -> Option<QualifiedBy> {
+    let q = c.qualification.as_ref()?;
+    let others: Vec<Competition> = all
+        .iter()
+        .filter(|o| match (&o.id, &c.id) {
+            (Some(a), Some(b)) => a != b,
+            _ => o.name != c.name,
+        })
+        .cloned()
+        .collect();
+    let mine = q.applicable(c.age_group.as_deref(), c.category.as_deref());
+    let said = c.age_group.is_some() || c.category.is_some();
+    let standard = match mine.as_slice() {
+        [only] => *only,
+        _ if said => *mine.first()?,
+        _ => return None,
+    };
+    let m = q.met_by(standard, &others)?;
+    Some(QualifiedBy {
+        total: m.total().kg()?,
+        meet: m.name.clone(),
+        date: m.date.clone(),
+        category: m.category.clone(),
+    })
 }
 
 fn slug_of(path: &Path) -> Option<String> {
@@ -105,11 +147,17 @@ impl CompStore {
     /// that happened at the dawn of time, and an undated row at the top of
     /// the list would read as next up.
     pub fn list(&self) -> Vec<CompSummary> {
-        let mut out: Vec<CompSummary> = self
+        let parsed: Vec<(String, Result<Competition, Vec<ParseError>>)> = self
             .stored()
             .into_iter()
-            .map(|(slug, source)| match comp::parse_competition(&source) {
+            .map(|(slug, source)| (slug, comp::parse_competition(&source)))
+            .collect();
+        let all: Vec<Competition> = parsed.iter().filter_map(|(_, r)| r.as_ref().ok().cloned()).collect();
+        let mut out: Vec<CompSummary> = parsed
+            .into_iter()
+            .map(|(slug, parsed)| match parsed {
                 Ok(c) => CompSummary {
+                    qualified: qualified(&c, &all),
                     slug,
                     name: c.name.clone(),
                     date: c.date.clone(),
@@ -135,6 +183,7 @@ impl CompStore {
                     total: TotalState::Open,
                     attempts_taken: 0,
                     standards: 0,
+                    qualified: None,
                     error: Some(format!("line {}: {}", errs[0].line, errs[0].message)),
                 },
             })
@@ -231,6 +280,27 @@ mod tests {
     }
 
     const MEET: &str = "# Lisbon Open\n- kind: competition\n- date: 2026-05-10\n- org: FPH\n";
+
+    #[test]
+    fn a_meet_whose_mark_is_already_met_lists_the_best_total_that_met_it() {
+        let store = temp_store("qualified");
+        let euros = "# Europeans\n- kind: competition\n- date: 2026-11-20\n- age group: M40\n\n\
+                     ## Qualification\n- from: 2026-01-01\n- to: 2026-10-31\n\n\
+                     ### M40\n- needs: 200\n\n### M45\n- needs: 180\n";
+        let result = |name: &str, date: &str, sn: u32, cj: u32| {
+            format!("# {name}\n- kind: competition\n- date: {date}\n\n## Snatch\n- 1: {sn} good\n\n## Clean & Jerk\n- 1: {cj} good\n")
+        };
+        store.save(euros, None, NOW).unwrap();
+        store.save(&result("Spring Open", "2026-03-01", 82, 108), None, NOW).unwrap();
+        let find = |store: &CompStore| store.list().into_iter().find(|s| s.name == "Europeans").unwrap();
+        // 190 is over the M45 row, but that is not this entry's row.
+        assert_eq!(find(&store).qualified, None);
+
+        store.save(&result("Summer Open", "2026-06-01", 92, 118), None, NOW).unwrap();
+        store.save(&result("Autumn Open", "2026-09-01", 91, 115), None, NOW).unwrap();
+        let q = find(&store).qualified.unwrap();
+        assert_eq!((q.total, q.meet.as_str()), (210.0, "Summer Open"));
+    }
 
     #[test]
     fn saves_and_reads_back() {

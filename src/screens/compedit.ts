@@ -2,82 +2,65 @@ import {
   api,
   effectiveRegistered,
   fmtKg,
-  isPastCompetition,
-  nextWarmupKg,
   newCompetition,
   todayStr,
-  type Attempt,
-  type AttemptResult,
   type Competition,
-  type LiftEntry,
   type ParseError,
   type Qualification,
   type Standard,
 } from "../api";
 import { esc } from "./library";
+import { bindOrgPicker, orgPicker, type OrgPickerState } from "./orgpicker";
 
 /**
- * Add or change a competition.
+ * The form for a new meet — every detail open at once, because a meet that
+ * does not exist yet has nothing to tap. Once saved, the meet screen is where
+ * each detail is changed, one tap at a time; this screen is only reached again
+ * for a meet whose file no longer reads, where starting over is the fix.
  *
  * Two things are being written here and they are not the same thing: what
- * happened (or will happen) at *this* meet, and what it takes to get **into**
- * it. The second is the qualifying table, which lives on the meet it admits
- * you to — so adding "the marks I need for Europeans" means adding Europeans
- * as a competition and giving it a standard, not annotating the meet you are
- * lifting at next week.
+ * this meet is, and what it takes to get **into** it. The second is the
+ * qualifying table, which lives on the meet it admits you to — so adding "the
+ * marks I need for Europeans" means adding Europeans as a competition and
+ * giving it a standard, not annotating the meet you are lifting at next week.
  */
 export async function renderCompEdit(root: HTMLElement, slug: string | null) {
-  let c: Competition = newCompetition("", todayStr());
+  const c: Competition = newCompetition("", todayStr());
+  const orgs: OrgPickerState = { organizations: await api.listOrganizations(), adding: null };
   let loadError: string | null = null;
-  let organizations = await api.listOrganizations();
-  // Which org picker, if any, is showing its "new organization" row instead
-  // of its dropdown — at most one at a time, since it is one form.
-  let addingOrgFor: string | null = null;
-
   if (slug) {
     try {
       const parsed = await api.parseCompetition(await api.getCompetitionSource(slug));
       if (parsed.status === "ok") {
-        c = parsed.competition;
-      } else {
-        loadError = `line ${parsed.errors[0].line}: ${parsed.errors[0].message}`;
+        // Readable after all — it belongs on the meet screen.
+        location.hash = `#/comp/${encodeURIComponent(slug)}`;
+        return;
       }
+      loadError = `line ${parsed.errors[0].line}: ${parsed.errors[0].message}`;
     } catch (e) {
       loadError = String(e);
     }
   }
 
-  // Attempts start folded away on a meet that has none yet — nothing to show
-  // before the bar is loaded, and a future meet is exactly the case this
-  // screen is for. A meet that already has data keeps it in view.
-  let showAttempts = hasLiftData(c.snatch) || hasLiftData(c.clean_jerk);
-
-  const backHash = slug ? `#/comp/${encodeURIComponent(slug)}` : "#/library";
-
   function render() {
     root.innerHTML = `
       <div class="screen editor">
         <header class="topbar">
-          <a class="btn" href="${backHash}">‹ Back</a>
-          <h1>${slug ? "Edit meet" : "New meet"}</h1>
-          ${slug ? `<a class="btn" href="#/runcomp/${encodeURIComponent(slug)}">▶ Run</a>` : ""}
+          <a class="btn" href="#/competitions">‹ Back</a>
+          <h1>${slug ? "Rewrite meet" : "New meet"}</h1>
           <button class="btn primary" id="save">Save</button>
         </header>
         <div class="view-scroll">
-          ${loadError ? `<div class="editor-status invalid">${esc(loadError)}</div>` : ""}
+          ${loadError ? `<div class="editor-status invalid">${esc(loadError)} — saving replaces the file.</div>` : ""}
           <div id="status" class="editor-status"></div>
 
           <section class="comp-fields">
             ${field("Name", `<input class="text-input" id="name" value="${esc(c.name)}" placeholder="Portuguese Nationals 2027">`)}
             ${field("Date", `<input class="text-input" id="date" type="date" value="${esc(c.date ?? "")}">`)}
-            ${field(
-              "Organizer",
-              orgPicker("organizer", "single", c.organizer ? [c.organizer] : [], organizations, addingOrgFor),
-              "Who is running the meet.",
-            )}
+            ${field("Organizer", orgPicker("organizer", "single", c.organizer ? [c.organizer] : [], orgs), "Who is running the meet.")}
             ${field(
               "Sanctioned by",
-              orgPicker("orgs", "multi", c.orgs, organizations, addingOrgFor),
+              orgPicker("orgs", "multi", c.orgs, orgs),
               "This is what decides whether a total here counts towards another meet's standard.",
             )}
             ${field("Weight class", `<input class="text-input" id="category" value="${esc(c.category ?? "")}" placeholder="89 kg">`)}
@@ -99,26 +82,7 @@ export async function renderCompEdit(root: HTMLElement, slug: string | null) {
                 : "Checked by default — nothing here is gating entry.",
             )}
           </section>
-
-          <div class="section-head">
-            <h2>Attempts</h2>
-            <div class="section-actions">
-              <button class="btn" id="toggleattempts">${showAttempts ? "Hide" : "+ Add attempts"}</button>
-            </div>
-          </div>
-          ${
-            showAttempts
-              ? `${
-                  isPastCompetition(c)
-                    ? ""
-                    : `<div class="comp-hint">Weights here are a plan — mark what actually happened from ${
-                        slug
-                          ? `the <a href="#/runcomp/${encodeURIComponent(slug)}">Run screen</a> on the day`
-                          : "the Run screen, once this meet is saved"
-                      }.</div>`
-                }${liftSection("Snatch", "snatch", c.snatch, isPastCompetition(c))}${liftSection("Clean & Jerk", "clean_jerk", c.clean_jerk, isPastCompetition(c))}`
-              : `<div class="empty small">Nothing declared yet — add attempts once you know what you are opening with.</div>`
-          }
+          <div class="comp-hint">Warmups and attempts are planned on the meet itself, once it is saved.</div>
 
           <div class="section-head">
             <h2>Entry standard</h2>
@@ -131,13 +95,7 @@ export async function renderCompEdit(root: HTMLElement, slug: string | null) {
             must be set in, and which federations' meets count. Add it here, on
             the competition you are trying to enter.
           </div>
-          ${c.qualification ? qualSection(c.qualification, organizations, addingOrgFor) : ""}
-
-          ${
-            slug
-              ? `<div class="comp-danger"><button class="btn danger" id="delete">🗑 Delete this meet</button></div>`
-              : ""
-          }
+          ${c.qualification ? qualSection(c.qualification, orgs) : ""}
         </div>
       </div>`;
     bind();
@@ -150,77 +108,18 @@ export async function renderCompEdit(root: HTMLElement, slug: string | null) {
     };
     const text = (v: string): string | null => (v.trim() === "" ? null : v.trim());
 
-    // One org picker's worth of wiring: picking an existing organization
-    // (or clearing a single-value field back to none), picking "+ New" to
-    // reveal the add row, confirming or cancelling that row, and removing a
-    // chip from a multi-value field. `get`/`set` reach into whichever part of
-    // `c` this picker owns, so the same wiring serves all three of them.
-    function bindOrgPicker(
-      fieldId: string,
-      mode: "single" | "multi",
-      get: () => string[],
-      set: (values: string[]) => void,
-    ) {
-      root.querySelector<HTMLSelectElement>(`[data-orgpick="${fieldId}"]`)?.addEventListener("change", (ev) => {
-        const value = (ev.currentTarget as HTMLSelectElement).value;
-        if (value === "__new__") {
-          addingOrgFor = fieldId;
-          render();
-          root.querySelector<HTMLInputElement>(`#orgnew-${fieldId}`)?.focus();
-          return;
-        }
-        if (mode === "single") {
-          set(value ? [value] : []);
-        } else if (value && !get().some((v) => v.toLowerCase() === value.toLowerCase())) {
-          set([...get(), value]);
-        }
-        render();
-      });
-      root.querySelector<HTMLButtonElement>(`[data-orgconfirm="${fieldId}"]`)?.addEventListener("click", () => {
-        void (async () => {
-          const input = root.querySelector<HTMLInputElement>(`#orgnew-${fieldId}`)!;
-          const name = input.value.trim();
-          if (name === "") return;
-          organizations = await api.addOrganization(name);
-          set(mode === "single" ? [name] : [...get(), name]);
-          addingOrgFor = null;
-          render();
-        })();
-      });
-      root.querySelector<HTMLButtonElement>(`[data-orgcancel="${fieldId}"]`)?.addEventListener("click", () => {
-        addingOrgFor = null;
-        render();
-      });
-      root.querySelectorAll<HTMLButtonElement>(`[data-orgdel^="${fieldId}:"]`).forEach((btn) => {
-        btn.addEventListener("click", () => {
-          const i = Number(btn.dataset.orgdel!.split(":")[1]);
-          set(get().filter((_, idx) => idx !== i));
-          render();
-        });
-      });
-    }
-
     on("name", "input", (el) => (c.name = el.value));
-    // Re-rendered rather than mutated in place like the fields below: the
-    // date is what decides whether attempts below are a plan or a record —
-    // crossing into the past needs to unlock the result toggle right away,
-    // not on the next unrelated render.
-    on("date", "change", (el) => {
-      c.date = text(el.value);
-      render();
-    });
+    on("date", "change", (el) => (c.date = text(el.value)));
     bindOrgPicker(
+      root,
       "organizer",
       "single",
+      orgs,
       () => (c.organizer ? [c.organizer] : []),
       (v) => (c.organizer = v[0] ?? null),
+      render,
     );
-    bindOrgPicker(
-      "orgs",
-      "multi",
-      () => c.orgs,
-      (v) => (c.orgs = v),
-    );
+    bindOrgPicker(root, "orgs", "multi", orgs, () => c.orgs, (v) => (c.orgs = v), render);
     on("category", "input", (el) => (c.category = text(el.value)));
     on("agegroup", "input", (el) => (c.age_group = text(el.value)));
     on("bodyweight", "input", (el) => {
@@ -233,99 +132,21 @@ export async function renderCompEdit(root: HTMLElement, slug: string | null) {
     root.querySelector<HTMLInputElement>("#registered")?.addEventListener("change", (ev) => {
       c.registered_override = (ev.currentTarget as HTMLInputElement).checked;
     });
-    root.querySelector("#toggleattempts")?.addEventListener("click", () => {
-      showAttempts = !showAttempts;
-      render();
-    });
 
-    // --- attempts ---
-    root.querySelectorAll<HTMLInputElement>("[data-attempt]").forEach((el) => {
-      el.addEventListener("input", () => {
-        const entry = liftOf(el.dataset.lift!);
-        const i = Number(el.dataset.attempt);
-        const kg = Number(el.value);
-        entry.attempts[i] =
-          el.value.trim() === "" || Number.isNaN(kg) || kg <= 0
-            ? null
-            : { kg, result: entry.attempts[i]?.result ?? "planned" };
-        // The result button's label follows the slot, so it has to be redrawn
-        // when a weight appears or disappears under it.
-        const btn = root.querySelector<HTMLButtonElement>(
-          `[data-result="${i}"][data-lift="${el.dataset.lift}"]`,
-        );
-        if (btn) setResultLabel(btn, entry.attempts[i]);
-      });
-    });
-    root.querySelectorAll<HTMLButtonElement>("[data-result]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const entry = liftOf(btn.dataset.lift!);
-        const i = Number(btn.dataset.result);
-        const a = entry.attempts[i];
-        if (!a) return;
-        // Round-trip rather than one-way: a mis-tap is undone by tapping on.
-        const next: Record<AttemptResult, AttemptResult> = {
-          planned: "declared",
-          declared: "good",
-          good: "miss",
-          miss: "planned",
-        };
-        a.result = next[a.result];
-        setResultLabel(btn, a);
-      });
-    });
-
-    // --- warmup ---
-    root.querySelectorAll<HTMLButtonElement>("[data-warmadd]").forEach((btn) =>
-      btn.addEventListener("click", () => {
-        const entry = liftOf(btn.dataset.warmadd!);
-        const last = entry.warmup[entry.warmup.length - 1];
-        entry.warmup.push({ kg: nextWarmupKg(entry), reps: last?.reps ?? 2, done: false });
-        render();
-      }),
-    );
-    root.querySelectorAll<HTMLElement>("[data-warmtick]").forEach((el) =>
-      el.addEventListener("click", () => {
-        const entry = liftOf(el.dataset.lift!);
-        const set = entry.warmup[Number(el.dataset.warmtick)];
-        set.done = !set.done;
-        render();
-      }),
-    );
-    root.querySelectorAll<HTMLButtonElement>("[data-warmdel]").forEach((btn) =>
-      btn.addEventListener("click", () => {
-        liftOf(btn.dataset.lift!).warmup.splice(Number(btn.dataset.warmdel), 1);
-        render();
-      }),
-    );
-    root.querySelectorAll<HTMLInputElement>("[data-warmkg]").forEach((el) =>
-      el.addEventListener("input", () => {
-        const set = liftOf(el.dataset.lift!).warmup[Number(el.dataset.warmkg)];
-        const n = Number(el.value);
-        if (!Number.isNaN(n) && n > 0) set.kg = n;
-      }),
-    );
-    root.querySelectorAll<HTMLInputElement>("[data-warmreps]").forEach((el) =>
-      el.addEventListener("input", () => {
-        const set = liftOf(el.dataset.lift!).warmup[Number(el.dataset.warmreps)];
-        const n = Number(el.value);
-        if (!Number.isNaN(n) && n >= 1) set.reps = Math.round(n);
-      }),
-    );
-
-    // --- qualification ---
     root.querySelector("#togglequal")?.addEventListener("click", () => {
-      c.qualification = c.qualification
-        ? null
-        : { from: null, to: null, counts: [], standards: [blankStandard(c)] };
+      c.qualification = c.qualification ? null : { from: null, to: null, counts: [], standards: [blankStandard(c)] };
       render();
     });
     on("qualfrom", "change", (el) => (c.qualification!.from = text(el.value)));
     on("qualto", "change", (el) => (c.qualification!.to = text(el.value)));
     bindOrgPicker(
+      root,
       "counts",
       "multi",
+      orgs,
       () => c.qualification!.counts,
       (v) => (c.qualification!.counts = v),
+      render,
     );
     root.querySelector("#addmark")?.addEventListener("click", () => {
       c.qualification!.standards.push(blankStandard(c));
@@ -345,9 +166,9 @@ export async function renderCompEdit(root: HTMLElement, slug: string | null) {
           const n = Number(el.value);
           s.total = Number.isNaN(n) ? 0 : n;
         } else if (f === "age") {
-          s.age_group = el.value.trim() === "" ? null : el.value.trim();
+          s.age_group = text(el.value);
         } else if (f === "category") {
-          s.category = el.value.trim() === "" ? null : el.value.trim();
+          s.category = text(el.value);
         } else {
           s.label = el.value.trim();
         }
@@ -355,23 +176,6 @@ export async function renderCompEdit(root: HTMLElement, slug: string | null) {
     );
 
     root.querySelector("#save")?.addEventListener("click", () => void save());
-    root.querySelector("#delete")?.addEventListener("click", (ev) => {
-      const btn = ev.currentTarget as HTMLButtonElement;
-      if (!btn.dataset.armed) {
-        btn.dataset.armed = "1";
-        btn.textContent = "Sure?";
-        setTimeout(() => {
-          delete btn.dataset.armed;
-          btn.textContent = "🗑 Delete this meet";
-        }, 3000);
-        return;
-      }
-      void api.deleteCompetition(slug!).then(() => (location.hash = "#/library"));
-    });
-  }
-
-  function liftOf(name: string): LiftEntry {
-    return name === "snatch" ? c.snatch : c.clean_jerk;
   }
 
   function status(message: string, ok: boolean) {
@@ -396,72 +200,21 @@ export async function renderCompEdit(root: HTMLElement, slug: string | null) {
       }
     }
     try {
-      const source = await api.serializeCompetition(c);
-      const saved = await api.saveCompetition(source, slug);
+      const saved = await api.saveCompetition(await api.serializeCompetition(c), slug);
       location.hash = `#/comp/${encodeURIComponent(saved.slug)}`;
     } catch (e) {
       const errs = e as ParseError[];
-      status(
-        Array.isArray(errs) && errs[0] ? `line ${errs[0].line}: ${errs[0].message}` : String(e),
-        false,
-      );
+      status(Array.isArray(errs) && errs[0] ? `line ${errs[0].line}: ${errs[0].message}` : String(e), false);
     }
   }
 
   render();
 }
 
-/** Is there anything on this lift worth showing? */
-export function hasLiftData(entry: LiftEntry): boolean {
-  return entry.attempts.some((a) => a !== null) || entry.warmup.length > 0;
-}
-
-function blankStandard(c: Competition): Standard {
+export function blankStandard(c: Competition): Standard {
   // Pre-filled with the group this meet says it is entering, since that is
   // almost always the row you came here to write.
   return { total: 0, label: "", age_group: c.age_group, category: c.category };
-}
-
-/**
- * An organization field: a dropdown of organizations the app knows about,
- * with a "+ New organization…" option that swaps in an add row rather than
- * navigating away — the meet you are editing is exactly where a new
- * organization is first needed, so this is where adding one belongs.
- *
- * `single` clears back to "— none —"; `multi` keeps chosen values as removable
- * chips above the dropdown and offers only the ones not already chosen.
- */
-function orgPicker(
-  fieldId: string,
-  mode: "single" | "multi",
-  values: string[],
-  organizations: string[],
-  addingOrgFor: string | null,
-): string {
-  if (addingOrgFor === fieldId) {
-    return `
-      <div class="org-add-row">
-        <input class="text-input" id="orgnew-${fieldId}" placeholder="Organization name" autofocus>
-        <button class="btn primary" data-orgconfirm="${fieldId}">Add</button>
-        <button class="btn" data-orgcancel="${fieldId}">Cancel</button>
-      </div>`;
-  }
-  const current = values[0] ?? "";
-  const avail = mode === "multi" ? organizations.filter((o) => !values.some((v) => v.toLowerCase() === o.toLowerCase())) : organizations;
-  const chips =
-    mode === "multi" && values.length
-      ? `<div class="chip-list">${values
-          .map((o, i) => `<span class="chip">${esc(o)}<button class="chip-remove" data-orgdel="${fieldId}:${i}">✕</button></span>`)
-          .join("")}</div>`
-      : "";
-  const placeholder = mode === "single" ? "— none —" : "+ add organization…";
-  return `
-    ${chips}
-    <select class="text-input" data-orgpick="${fieldId}">
-      <option value="" ${current ? "" : "selected"}>${placeholder}</option>
-      ${avail.map((o) => `<option value="${esc(o)}" ${o === current ? "selected" : ""}>${esc(o)}</option>`).join("")}
-      <option value="__new__">+ New organization…</option>
-    </select>`;
 }
 
 function field(label: string, input: string, hint?: string): string {
@@ -473,66 +226,7 @@ function field(label: string, input: string, hint?: string): string {
     </label>`;
 }
 
-/**
- * The attempts + warmup editor for one lift, shared by the meet editor and
- * the Run screen. `editable` gates only the result — good/miss is what
- * happened, and that is a Run-screen fact (or one an already-past meet can
- * be corrected on); the weight is always yours to plan, meet day or not.
- */
-export function liftSection(title: string, key: string, entry: LiftEntry, editable: boolean): string {
-  const attempts = entry.attempts
-    .map(
-      (a, i) => `
-      <div class="comp-edit-attempt">
-        <span class="comp-attempt-n">${i + 1}</span>
-        <input class="text-input" type="number" inputmode="decimal" step="0.5"
-               data-attempt="${i}" data-lift="${key}" value="${a ? fmtKg(a.kg) : ""}" placeholder="kg">
-        ${
-          editable
-            ? `<button class="btn comp-result-btn" data-result="${i}" data-lift="${key}">${resultLabel(a)}</button>`
-            : `<span class="btn comp-result-btn readonly">${resultLabel(a)}</span>`
-        }
-      </div>`,
-    )
-    .join("");
-  const warmup = entry.warmup
-    .map(
-      (w, i) => `
-      <div class="comp-edit-set">
-        <button class="btn comp-tick ${w.done ? "done" : ""}" data-warmtick="${i}" data-lift="${key}">${
-          w.done ? "✓" : "○"
-        }</button>
-        <input class="text-input" type="number" inputmode="decimal" step="0.5"
-               data-warmkg="${i}" data-lift="${key}" value="${fmtKg(w.kg)}">
-        <span class="comp-x">×</span>
-        <input class="text-input" type="number" inputmode="numeric" min="1"
-               data-warmreps="${i}" data-lift="${key}" value="${w.reps}">
-        <button class="btn danger" data-warmdel="${i}" data-lift="${key}">✕</button>
-      </div>`,
-    )
-    .join("");
-  return `
-    <div class="section-head">
-      <h2>${title}</h2>
-      <div class="section-actions">
-        <button class="btn" data-warmadd="${key}">+ Warmup set</button>
-      </div>
-    </div>
-    ${warmup}
-    <div class="comp-edit-attempts">${attempts}</div>`;
-}
-
-export function resultLabel(a: Attempt | null): string {
-  if (!a) return "—";
-  return a.result === "good" ? "✓ good" : a.result === "miss" ? "✗ no lift" : a.result;
-}
-
-export function setResultLabel(btn: HTMLButtonElement, a: Attempt | null) {
-  btn.textContent = resultLabel(a);
-  btn.className = `btn comp-result-btn ${a ? a.result : ""}`;
-}
-
-function qualSection(q: Qualification, organizations: string[], addingOrgFor: string | null): string {
+function qualSection(q: Qualification, orgs: OrgPickerState): string {
   const rows = q.standards
     .map(
       (s, i) => `
@@ -550,11 +244,7 @@ function qualSection(q: Qualification, organizations: string[], addingOrgFor: st
     <section class="comp-fields">
       ${field("Results count from", `<input class="text-input" id="qualfrom" type="date" value="${esc(q.from ?? "")}">`)}
       ${field("until", `<input class="text-input" id="qualto" type="date" value="${esc(q.to ?? "")}">`)}
-      ${field(
-        "Meets that count",
-        orgPicker("counts", "multi", q.counts, organizations, addingOrgFor),
-        "Leave empty and any meet counts.",
-      )}
+      ${field("Meets that count", orgPicker("counts", "multi", q.counts, orgs), "Leave empty and any meet counts.")}
       <div class="comp-marks-head">
         <span class="quick-label">Marks</span>
         <button class="btn" id="addmark">+ Add mark</button>
