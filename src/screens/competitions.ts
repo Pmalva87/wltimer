@@ -1,6 +1,6 @@
 import { api, type CompSummary } from "../api";
 import { compRow } from "./comp";
-import { esc } from "./library";
+import { armDelete, esc } from "./library";
 import { tabBar } from "../tabs";
 
 /**
@@ -73,6 +73,13 @@ export async function renderCompetitions(root: HTMLElement) {
       btn.addEventListener("click", async () => {
         organizations = await api.deleteOrganization(btn.dataset.orgdel!);
         render();
+      });
+    });
+    root.querySelectorAll<HTMLButtonElement>("button.compdelete").forEach((btn) => {
+      const label = btn.textContent ?? "🗑";
+      armDelete(btn, label, async () => {
+        await api.deleteCompetition(btn.dataset.slug!);
+        await renderCompetitions(root);
       });
     });
   }

@@ -68,7 +68,7 @@ function restoreSummary(r: ImportReport): string {
 }
 
 /** Two-tap confirmation for destructive buttons. */
-function armDelete(btn: HTMLButtonElement, label: string, action: () => Promise<void>) {
+export function armDelete(btn: HTMLButtonElement, label: string, action: () => Promise<void>) {
   btn.addEventListener("click", async () => {
     if (btn.dataset.armed) {
       await action();

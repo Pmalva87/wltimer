@@ -189,8 +189,9 @@ platform, and what the meet totals.
   lists more than once, and an app that owns them strands documents when they
   change.
 - `- target:` — a total you want *today*. Not a qualifying mark.
-- `## Snatch` / `## Clean & Jerk` — `- <n>: <kg> [good|miss]`, three attempts
-  each. No result word means declared but not yet taken. Checkbox lines
+- `## Snatch` / `## Clean & Jerk` — `- <n>: <kg> [planned|good|miss]`, three
+  attempts each. `planned` is a weight you have not told the table yet; no
+  result word means declared but not yet taken. Checkbox lines
   anywhere in the section are warmup sets.
 - The **total** is the sum of each lift's best good attempt. Three misses in a
   lift is a bomb-out: there is no total and there cannot be one, which is not

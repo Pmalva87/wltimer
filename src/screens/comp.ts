@@ -4,8 +4,10 @@ import {
   type CompSummary,
   type CompView,
   type LiftEntry,
+  type Lift,
   type MarkView,
   type Qualification,
+  type Reach,
   type StandardView,
   type TargetStatus,
   type TotalState,
@@ -20,6 +22,9 @@ export function compRow(c: CompSummary): string {
                 <span class="name">🏆 ${esc(c.name)}</span>
                 <span class="meta error">${esc(c.error)}</span>
               </a>
+              <div class="actions compact">
+                <button class="btn danger compdelete" data-slug="${esc(c.slug)}">🗑 Delete</button>
+              </div>
             </div>`;
   }
   const bits = [
@@ -49,8 +54,10 @@ export function compRow(c: CompSummary): string {
               <span class="meta">${bits.join(" · ")}</span>
             </a>
             <div class="actions compact">
-              <a class="btn primary" href="#/comp/${encodeURIComponent(c.slug)}">👁 View</a>
+              <a class="btn primary" href="#/runcomp/${encodeURIComponent(c.slug)}">▶ Run</a>
+              <a class="btn" href="#/comp/${encodeURIComponent(c.slug)}">👁 View</a>
               <a class="btn" href="#/compedit/${encodeURIComponent(c.slug)}">✎ Edit</a>
+              <button class="btn danger compdelete" data-slug="${esc(c.slug)}">🗑</button>
             </div>
           </div>`;
 }
@@ -92,6 +99,7 @@ export async function renderComp(root: HTMLElement, slug: string) {
     <div class="screen viewer">
       <header class="topbar">
         <a class="btn" href="#/library">‹ Back</a>
+        <a class="btn" href="#/runcomp/${encodeURIComponent(slug)}">▶ Run</a>
         <a class="btn primary" href="#/compedit/${encodeURIComponent(slug)}">Edit</a>
       </header>
       <div class="view-scroll">
@@ -99,19 +107,10 @@ export async function renderComp(root: HTMLElement, slug: string) {
         ${meta.length ? `<div class="comp-meta">${meta.map((m) => `<span>${m}</span>`).join("")}</div>` : ""}
         ${standardsSection(view.standards, c.age_group, c.category, c.qualification)}
         ${totalPanel(view)}
-        ${hasData(c.snatch) ? liftCard("Snatch", c.snatch, view.snatch_best, view.snatch_going_down, view.snatch_notes_html) : ""}
-        ${hasData(c.clean_jerk) ? liftCard("Clean & Jerk", c.clean_jerk, view.clean_jerk_best, view.clean_jerk_going_down, view.clean_jerk_notes_html) : ""}
-        ${
-          view.targets.length
-            ? `<section class="view-part">
-                 <div class="view-part-head"><h2>Today</h2></div>
-                 ${view.targets
-                   .map((t) => markRow(esc(t.label) || `${fmtKg(t.total)} total`, t.total, t.status, null))
-                   .join("")}
-               </section>`
-            : ""
-        }
-        ${marksSection(view.marks)}
+        ${hasData(c.snatch) ? liftCard(view, "snatch", "Snatch", c.snatch, view.snatch_best, view.snatch_going_down, view.snatch_notes_html) : ""}
+        ${hasData(c.clean_jerk) ? liftCard(view, "clean_jerk", "Clean & Jerk", c.clean_jerk, view.clean_jerk_best, view.clean_jerk_going_down, view.clean_jerk_notes_html) : ""}
+        ${targetsSection(view)}
+        ${marksSection(view)}
       </div>
     </div>`;
 }
@@ -121,13 +120,42 @@ function hasData(entry: LiftEntry): boolean {
   return entry.attempts.some((a) => a !== null) || entry.warmup.length > 0;
 }
 
-function totalPanel(view: CompView): string {
-  const possible =
-    view.best_possible_total != null && view.total.state !== "made"
-      ? `<span class="comp-total-note">${fmtKg(view.best_possible_total)} if you make what is declared</span>`
-      : view.best_possible_total != null && view.total.state === "made"
-        ? `<span class="comp-total-note">best possible ${fmtKg(view.best_possible_total)}</span>`
-        : "";
+/** Totals to chase today, shared with the Run screen. */
+export function targetsSection(view: CompView): string {
+  if (view.targets.length === 0) return "";
+  return `
+    <section class="view-part">
+      <div class="view-part-head"><h2>Today</h2></div>
+      ${view.targets
+        .map((t) => markRow(esc(t.label) || `${fmtKg(t.total)} total`, t.total, t.status, t.reach, started(view), null))
+        .join("")}
+    </section>`;
+}
+
+/** Has the bar been touched yet? Before it has, "your next lifts" are the
+ *  openers, and that is the word the screen should use. */
+function started(view: CompView): boolean {
+  const c = view.competition;
+  return [...c.snatch.attempts, ...c.clean_jerk.attempts].some((a) => a && (a.result === "good" || a.result === "miss"));
+}
+
+export function totalPanel(view: CompView): string {
+  const notes: string[] = [];
+  if (view.next_total != null && view.total.state !== "bombed_out") {
+    notes.push(
+      started(view)
+        ? `${fmtKg(view.next_total)} if you make your next lifts`
+        : `${fmtKg(view.next_total)} with your openers`,
+    );
+  }
+  if (view.best_possible_total != null && view.best_possible_total !== view.next_total) {
+    notes.push(
+      view.total.state === "made"
+        ? `best possible ${fmtKg(view.best_possible_total)}`
+        : `${fmtKg(view.best_possible_total)} if you make everything planned`,
+    );
+  }
+  const possible = notes.map((n) => `<span class="comp-total-note">${n}</span>`).join("");
   return `
     <section class="comp-total ${view.total.state}">
       <span class="comp-total-label">Total</span>
@@ -143,7 +171,31 @@ function totalText(t: TotalState): string {
   return t.state === "bombed_out" ? "no total" : "—";
 }
 
+/**
+ * What each goal asks of one attempt, shown on the attempt itself: once a
+ * mark comes down to a single number on a single lift, the attempt is where
+ * you look, and "make this and you are in" is the whole message.
+ */
+export function attemptGoals(view: CompView, lift: Lift, attempt: number, written: number | null): string {
+  const goals = [
+    ...view.targets.map((t) => ({ label: esc(t.label) || `${fmtKg(t.total)} total`, status: t.status })),
+    ...view.marks.map((m) => ({ label: `${esc(m.meet)}${m.label ? ` · ${esc(m.label)}` : ""}`, status: m.status })),
+  ];
+  return goals
+    .map(({ label, status: s }) => {
+      if (s.state !== "needs" || s.lift !== lift || s.attempt !== attempt) return "";
+      if (written != null && written >= s.kg) {
+        return `<div class="comp-goal clinch">🎯 ${label} — make ${fmtKg(written)} and it is yours (needs ${fmtKg(s.kg)})</div>`;
+      }
+      const gap = written != null ? ` — ${fmtKg(s.kg - written)} more than written` : "";
+      return `<div class="comp-goal">🎯 ${label} — needs ${fmtKg(s.kg)}${gap}</div>`;
+    })
+    .join("");
+}
+
 function liftCard(
+  view: CompView,
+  lift: Lift,
   name: string,
   entry: LiftEntry,
   best: number | null,
@@ -154,20 +206,25 @@ function liftCard(
     .map((a, i) => {
       const n = i + 1;
       if (!a) {
-        return `<div class="comp-attempt empty"><span class="comp-attempt-n">${n}</span><span class="comp-attempt-kg">—</span></div>`;
+        return `<div class="comp-attempt empty"><span class="comp-attempt-n">${n}</span><span class="comp-attempt-kg">—</span></div>${attemptGoals(
+          view,
+          lift,
+          n,
+          null,
+        )}`;
       }
       const mark =
         a.result === "good"
           ? `<span class="comp-result good">✓ good lift</span>`
           : a.result === "miss"
             ? `<span class="comp-result miss">✗ no lift</span>`
-            : `<span class="comp-result declared">declared</span>`;
+            : `<span class="comp-result declared">${a.result}</span>`;
       const warn = goingDown.includes(n) ? `<span class="meta-warn">⚠ lighter than the one before</span>` : "";
       return `<div class="comp-attempt ${a.result}">
                 <span class="comp-attempt-n">${n}</span>
                 <span class="comp-attempt-kg">${fmtKg(a.kg)}</span>
                 ${mark}${warn}
-              </div>`;
+              </div>${attemptGoals(view, lift, n, a.kg)}`;
     })
     .join("");
   const warmup = entry.warmup.length
@@ -193,8 +250,11 @@ function liftCard(
 }
 
 /** Qualifying marks at other meets that a total here could still win. */
-function marksSection(marks: MarkView[]): string {
-  if (marks.length === 0) return "";
+export function marksSection(view: CompView): string {
+  if (view.marks.length === 0) return "";
+  // Lightest first: the next mark to clinch is the one worth reading first,
+  // and the order is the order you will pass them in on the day.
+  const marks: MarkView[] = [...view.marks].sort((a, b) => a.total - b.total);
   return `
     <section class="view-part">
       <div class="view-part-head"><h2>What this meet can win</h2></div>
@@ -204,6 +264,8 @@ function marksSection(marks: MarkView[]): string {
             `${esc(m.meet)}${m.label ? ` · ${esc(m.label)}` : ""}`,
             m.total,
             m.status,
+            m.reach,
+            started(view),
             group(m.age_group, m.category),
           ),
         )
@@ -220,7 +282,7 @@ function windowText(q: Qualification): string | null {
   return `Results up to ${fmtDay(q.to!)} count`;
 }
 
-function standardsSection(
+export function standardsSection(
   standards: StandardView[],
   ageGroup: string | null,
   category: string | null,
@@ -254,13 +316,41 @@ function standardsSection(
 }
 
 /** `label` arrives as HTML — every caller escapes its own text. */
-function markRow(label: string, total: number, status: TargetStatus, groupText: string | null): string {
+function markRow(
+  label: string,
+  total: number,
+  status: TargetStatus,
+  reach: Reach | null,
+  started: boolean,
+  groupText: string | null,
+): string {
   return `
     <div class="comp-mark">
       <span class="comp-mark-total">${fmtKg(total)}</span>
       <span class="comp-mark-label">${label}${groupText ? ` <span class="muted">${esc(groupText)}</span>` : ""}</span>
       ${statusText(status)}
+      ${reach ? reachText(reach, status, started) : ""}
     </div>`;
+}
+
+/** The plan against the mark — the line under the status that answers "and
+ *  what I have written, does it get there?" */
+function reachText(r: Reach, s: TargetStatus, started: boolean): string {
+  switch (r.state) {
+    case "next_lifts": {
+      const what =
+        s.state === "needs"
+          ? `make ${s.lift === "snatch" ? "snatch" : "C&J"} ${s.attempt} as written`
+          : started
+            ? `make your next lifts (${fmtKg(r.total)})`
+            : `make your openers (${fmtKg(r.total)})`;
+      return `<span class="comp-mark-reach clinch">✓ clinched if you ${what}</span>`;
+    }
+    case "plan":
+      return `<span class="comp-mark-reach">needs more than your ${started ? "next lifts" : "openers"} — your plan gets it (${fmtKg(r.total)})</span>`;
+    case "short":
+      return `<span class="comp-mark-reach short">your plan (${fmtKg(r.total)}) is ${fmtKg(r.kg)} short</span>`;
+  }
 }
 
 function statusText(s: TargetStatus): string {

@@ -75,7 +75,11 @@ impl Lift {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AttemptResult {
-    /// Declared, not yet taken. The weight is a plan and can still change.
+    /// What you mean to take, not yet told to the table. Written as the word
+    /// `planned`, because a bare weight already meant `Declared` in every
+    /// document written before this state existed.
+    Planned,
+    /// Declared, not yet taken. The weight can still change.
     Declared,
     Good,
     Miss,
@@ -85,7 +89,7 @@ impl AttemptResult {
     /// Taken attempts are spent, good or bad. The distinction the screens
     /// need far more often than good/miss is "can this one still change".
     pub fn taken(self) -> bool {
-        self != AttemptResult::Declared
+        matches!(self, AttemptResult::Good | AttemptResult::Miss)
     }
 }
 
@@ -325,6 +329,26 @@ pub enum TargetStatus {
     OutOfReach,
 }
 
+/// How far the weights you have written down reach toward a total — the half
+/// of a target that [`TargetStatus`] leaves out. The status says what the
+/// meet *requires*; this says whether your own plan already answers it, which
+/// is the question on the platform: "if I make the 101 I declared, am I in?"
+///
+/// Only ever about weights written in the document, planned or declared. It
+/// is not a limit — an attempt can be changed to anything — but a reading of
+/// the plan as it stands.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum Reach {
+    /// Making the next attempt on each lift still live gets there. Before
+    /// the meet, that is your openers.
+    NextLifts { total: f64 },
+    /// The next attempts are not enough, but making the rest of the plan is.
+    Plan { total: f64 },
+    /// Everything written, all made, still comes up `kg` short.
+    Short { total: f64, kg: f64 },
+}
+
 impl LiftEntry {
     /// Heaviest good lift, which is the only attempt that counts for anything.
     pub fn best(&self) -> Option<f64> {
@@ -349,6 +373,12 @@ impl LiftEntry {
             .fold(self.best(), |acc: Option<f64>, kg| {
                 Some(acc.map_or(kg, |b| b.max(kg)))
             })
+    }
+
+    /// The weight written on the next attempt still to take, if one is.
+    pub fn next_written(&self) -> Option<f64> {
+        let i = self.next_attempt()? as usize - 1;
+        self.attempts[i].map(|a| a.kg)
     }
 
     pub fn taken(&self) -> usize {
@@ -438,6 +468,52 @@ impl Competition {
             (Some(s), Some(c)) => Some(s + c),
             _ => None,
         }
+    }
+
+    /// The total if the next attempt on each lift still live is made — before
+    /// the meet, the openers. A closed lift contributes what it made.
+    pub fn next_total(&self) -> Option<f64> {
+        self.projected(|e| e.next_written())
+    }
+
+    /// Like [`Self::best_possible_total`], but a lift closed by the order of
+    /// the meet counts only what it made: a snatch still written as declared
+    /// once the clean & jerk has begun is a plan that did not happen.
+    fn plan_total(&self) -> Option<f64> {
+        self.projected(|e| e.best_possible())
+    }
+
+    fn projected(&self, live: impl Fn(&LiftEntry) -> Option<f64>) -> Option<f64> {
+        let part = |l: Lift| {
+            let e = self.lift(l);
+            if self.closed(l) {
+                return e.best();
+            }
+            match (e.best(), live(e)) {
+                (Some(a), Some(b)) => Some(a.max(b)),
+                (a, b) => a.or(b),
+            }
+        };
+        Some(part(Lift::Snatch)? + part(Lift::CleanJerk)?)
+    }
+
+    /// How far the plan reaches toward `total`, while there is still
+    /// something to reach for. `None` once the target is settled either way,
+    /// or while a lift has no weight written at all — there is no plan to
+    /// read yet.
+    pub fn reach(&self, total: f64) -> Option<Reach> {
+        if matches!(self.target_status(total), TargetStatus::Clinched | TargetStatus::OutOfReach) {
+            return None;
+        }
+        let plan = self.plan_total()?;
+        if let Some(next) = self.next_total().filter(|&n| n >= total) {
+            return Some(Reach::NextLifts { total: next });
+        }
+        Some(if plan >= total {
+            Reach::Plan { total: plan }
+        } else {
+            Reach::Short { total: plan, kg: total - plan }
+        })
     }
 
     /// Whether a total can still happen at all.
@@ -742,6 +818,7 @@ fn parse_result(word: &str) -> Option<AttemptResult> {
         .filter(|c| c.is_ascii_alphanumeric())
         .collect();
     match norm.as_str() {
+        "planned" | "plan" => Some(AttemptResult::Planned),
         "good" | "made" | "o" | "y" | "yes" => Some(AttemptResult::Good),
         "miss" | "missed" | "nolift" | "no" | "x" | "fail" | "failed" => Some(AttemptResult::Miss),
         _ => None,
@@ -929,6 +1006,7 @@ pub fn competition_to_markdown(c: &Competition) -> String {
         for (i, slot) in e.attempts.iter().enumerate() {
             let Some(a) = slot else { continue };
             let result = match a.result {
+                AttemptResult::Planned => " planned".into(),
                 AttemptResult::Declared => String::new(),
                 AttemptResult::Good => " good".into(),
                 AttemptResult::Miss => " miss".into(),
@@ -1104,7 +1182,7 @@ fn attempt(entry: &mut LiftEntry, n: usize, val: &str, line: usize, errors: &mut
             None => {
                 errors.push(err(
                     line,
-                    format!("unknown result '{}' — write 'good', 'miss', or nothing at all", rest.trim()),
+                    format!("unknown result '{}' — write 'planned', 'good', 'miss', or nothing at all", rest.trim()),
                 ));
                 return;
             }
@@ -1450,6 +1528,29 @@ Openers felt fast.
     }
 
     #[test]
+    fn planned_is_its_own_word_and_a_bare_weight_stays_declared() {
+        let c = parse_competition("# M\n\n## Snatch\n- 1: 90 planned\n- 2: 94\n").unwrap();
+        assert_eq!(c.snatch.attempts[0].unwrap().result, AttemptResult::Planned);
+        assert_eq!(c.snatch.attempts[1], declared(94.0));
+        let md = competition_to_markdown(&c);
+        assert!(md.contains("- 1: 90 planned\n"), "{md}");
+        assert!(md.contains("- 2: 94\n"), "{md}");
+        assert_eq!(parse_competition(&md).unwrap(), c);
+    }
+
+    #[test]
+    fn a_planned_attempt_is_not_taken_but_counts_as_a_projection() {
+        let planned = Some(Attempt {
+            kg: 100.0,
+            result: AttemptResult::Planned,
+        });
+        let c = comp([made(95.0), planned, None], [None, None, None]);
+        assert_eq!(c.snatch.taken(), 1);
+        assert_eq!(c.snatch.next_attempt(), Some(2));
+        assert_eq!(c.snatch.best_possible(), Some(100.0));
+    }
+
+    #[test]
     fn organizer_may_be_spelled_either_way() {
         for key in ["organizer", "organiser", "organized by", "organised by"] {
             let c = parse_competition(&format!("# M\n- {key}: BWL\n")).unwrap();
@@ -1739,6 +1840,54 @@ Openers felt fast.
             c.target_status(400.0),
             TargetStatus::Needs { .. }
         ));
+    }
+
+    fn planned(kg: f64) -> Option<Attempt> {
+        Some(Attempt {
+            kg,
+            result: AttemptResult::Planned,
+        })
+    }
+
+    #[test]
+    fn before_the_meet_the_next_lifts_are_the_openers() {
+        let c = comp(
+            [planned(90.0), planned(94.0), planned(97.0)],
+            [planned(110.0), planned(115.0), planned(120.0)],
+        );
+        assert_eq!(c.next_total(), Some(200.0));
+        assert_eq!(c.reach(195.0), Some(Reach::NextLifts { total: 200.0 }));
+        assert_eq!(c.reach(210.0), Some(Reach::Plan { total: 217.0 }));
+        assert_eq!(c.reach(220.0), Some(Reach::Short { total: 217.0, kg: 3.0 }));
+    }
+
+    #[test]
+    fn a_declared_attempt_over_what_is_needed_clinches_on_the_next_lift() {
+        // 98 needed on the clean & jerk, 101 declared: make it and you are in.
+        let c = comp(
+            [made(90.0), missed(94.0), missed(94.0)],
+            [made(95.0), declared(101.0), None],
+        );
+        assert!(matches!(c.target_status(188.0), TargetStatus::Needs { kg: 98.0, .. }));
+        assert_eq!(c.reach(188.0), Some(Reach::NextLifts { total: 191.0 }));
+    }
+
+    #[test]
+    fn a_snatch_closed_by_the_clean_and_jerk_is_not_part_of_the_plan() {
+        let c = comp(
+            [made(90.0), declared(95.0), None],
+            [made(110.0), declared(114.0), None],
+        );
+        assert_eq!(c.next_total(), Some(204.0));
+        assert_eq!(c.reach(210.0), Some(Reach::Short { total: 204.0, kg: 6.0 }));
+    }
+
+    #[test]
+    fn a_settled_target_or_an_unwritten_lift_has_no_reach() {
+        let c = comp([made(100.0), None, None], [made(130.0), None, None]);
+        assert_eq!(c.reach(230.0), None);
+        let c = comp([planned(90.0), None, None], [None, None, None]);
+        assert_eq!(c.reach(200.0), None);
     }
 
     // ---- what counts toward what ----

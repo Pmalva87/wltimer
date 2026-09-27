@@ -163,7 +163,7 @@ export interface SyncReport {
 
 // ---- competitions ----
 
-export type AttemptResult = "declared" | "good" | "miss";
+export type AttemptResult = "planned" | "declared" | "good" | "miss";
 export type Lift = "snatch" | "clean_jerk";
 
 export interface Attempt {
@@ -273,13 +273,21 @@ export interface MarkView {
   age_group: string | null;
   category: string | null;
   status: TargetStatus;
+  reach: Reach | null;
 }
 
 export interface TargetView {
   total: number;
   label: string;
   status: TargetStatus;
+  reach: Reach | null;
 }
+
+/** Mirrors `comp::Reach` — how far the written weights get toward a total. */
+export type Reach =
+  | { state: "next_lifts"; total: number }
+  | { state: "plan"; total: number }
+  | { state: "short"; total: number; kg: number };
 
 export interface CompView {
   slug: string;
@@ -287,6 +295,8 @@ export interface CompView {
   registered: boolean;
   total: TotalState;
   best_possible_total: number | null;
+  /** Openers before the meet; the next attempt on each live lift after. */
+  next_total: number | null;
   snatch_best: number | null;
   clean_jerk_best: number | null;
   snatch_going_down: number[];
@@ -326,6 +336,35 @@ export function newCompetition(name: string, date: string | null): Competition {
  *  ask for the computed value, so it works it out the same way here. */
 export function effectiveRegistered(c: Competition): boolean {
   return c.registered_override ?? (!c.qualification || c.qualification.standards.length === 0);
+}
+
+/** A meet whose date has already passed. Undated or upcoming meets are not —
+ *  a meet you have not pinned a date to is still one you are planning for,
+ *  not one you are recording. This is what tells the editor whether declaring
+ *  an attempt's weight is all you get, or whether you may also say how it
+ *  went — recording results ahead of the fact belongs to the Run screen, on
+ *  the day, or to fixing up a meet that has already happened. */
+export function isPastCompetition(c: Competition): boolean {
+  return c.date !== null && c.date < todayStr();
+}
+
+/**
+ * The weight a new warmup set starts at: the empty bar first, then jumps that
+ * shrink as the bar closes on the opener — 10s while it is far off, 5s inside
+ * 20 kg, 3s or less inside 10 — and never past the opener, since a warmup
+ * heavier than your first attempt is a mis-tap, not a plan. Without an opener
+ * written there is nothing to close on, so it keeps to 10s. Only a starting
+ * point: the steppers are right there.
+ */
+export function nextWarmupKg(entry: LiftEntry): number {
+  const last = entry.warmup[entry.warmup.length - 1];
+  if (!last) return 20;
+  const opener = entry.attempts[0]?.kg;
+  if (opener == null) return last.kg + 10;
+  const gap = opener - last.kg;
+  if (gap <= 0) return last.kg;
+  const jump = gap > 20 ? 10 : gap > 10 ? 5 : 3;
+  return Math.min(last.kg + jump, opener);
 }
 
 /** `95`, `42.5` — weights are written the way they are read. */

@@ -1137,6 +1137,7 @@ pub struct MarkView {
     pub age_group: Option<String>,
     pub category: Option<String>,
     pub status: comp::TargetStatus,
+    pub reach: Option<comp::Reach>,
 }
 
 #[derive(Serialize)]
@@ -1144,6 +1145,7 @@ pub struct TargetView {
     pub total: f64,
     pub label: String,
     pub status: comp::TargetStatus,
+    pub reach: Option<comp::Reach>,
 }
 
 #[derive(Serialize)]
@@ -1153,6 +1155,8 @@ pub struct CompView {
     pub registered: bool,
     pub total: comp::TotalState,
     pub best_possible_total: Option<f64>,
+    /// Openers before the meet; the next attempt on each live lift after.
+    pub next_total: Option<f64>,
     pub snatch_best: Option<f64>,
     pub clean_jerk_best: Option<f64>,
     /// Attempts declared lighter than the one before them, per lift, 1-based.
@@ -1276,6 +1280,7 @@ pub fn view_competition(state: State<AppState>, slug: String) -> Result<CompView
             age_group: s.age_group.clone(),
             category: s.category.clone(),
             status: c.target_status(s.total),
+            reach: c.reach(s.total),
         })
         .collect();
 
@@ -1284,6 +1289,7 @@ pub fn view_competition(state: State<AppState>, slug: String) -> Result<CompView
         registered: c.registered(),
         total: c.total(),
         best_possible_total: c.best_possible_total(),
+        next_total: c.next_total(),
         snatch_best: c.snatch.best(),
         clean_jerk_best: c.clean_jerk.best(),
         snatch_going_down: c.snatch.attempts_going_down(),
@@ -1297,6 +1303,7 @@ pub fn view_competition(state: State<AppState>, slug: String) -> Result<CompView
                 total: t.total,
                 label: t.label.clone(),
                 status: c.target_status(t.total),
+                reach: c.reach(t.total),
             })
             .collect(),
         standards,

@@ -1435,6 +1435,10 @@ a.ov-note {
 .comp-result-btn.miss {
   color: #f87171;
 }
+.comp-result-btn.readonly {
+  cursor: default;
+  opacity: 0.75;
+}
 .comp-tick.done {
   color: #4ade80;
 }
@@ -1484,4 +1488,127 @@ a.ov-note {
 }
 .org-add-row .btn {
   flex: 0 0 auto;
+}
+
+/* ---- competition run screen ---- */
+
+.rc-save {
+  font-size: 0.8rem;
+  color: var(--muted);
+  max-width: 40%;
+  text-align: right;
+}
+.rc-save.error {
+  color: #f87171;
+}
+.rc-chip {
+  border: 1px solid transparent;
+  font-size: 0.95rem;
+  padding: 0.35rem 0.7rem;
+  cursor: pointer;
+}
+.rc-chip.focus {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.rc-chip.done.focus {
+  color: #4ade80;
+}
+.rc-add {
+  border-style: dashed;
+  border-color: #33415588;
+}
+button.rc-attempt {
+  width: 100%;
+  border: 1px solid transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+button.rc-attempt.empty {
+  opacity: 0.6;
+}
+.rc-attempt.focus {
+  border-color: var(--accent);
+  opacity: 1;
+}
+.rc-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0.4rem 0 0.75rem;
+  padding: 0.5rem;
+  border-radius: 10px;
+  background: var(--panel);
+}
+.rc-strip-label {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.rc-row {
+  display: flex;
+  gap: 0.35rem;
+}
+.rc-step {
+  flex: 0 0 auto;
+  min-width: 3rem;
+  padding: 0.7rem 0.5rem;
+  font-variant-numeric: tabular-nums;
+}
+.rc-kg {
+  flex: 1 1 4rem;
+  min-width: 0;
+  text-align: center;
+  font-size: 1.3rem;
+  font-weight: 600;
+}
+.rc-grow {
+  flex: 1 1 0;
+  padding: 0.7rem 0.4rem;
+}
+.rc-reps {
+  flex: 0 0 auto;
+  min-width: 3.5rem;
+}
+.rc-res.on.planned,
+.rc-res.on.declared {
+  border-color: var(--text);
+  background: #334155;
+}
+/* A plan is not yet a weight anyone else knows — shown, but quieter. */
+.comp-attempt.planned .comp-attempt-kg {
+  color: var(--muted);
+  font-style: italic;
+}
+.rc-res.on.good {
+  background: #166534;
+  border-color: #4ade80;
+}
+.rc-res.on.miss {
+  background: #7f1d1d;
+  border-color: #f87171;
+}
+.rc-foot {
+  margin: 1rem 0;
+}
+
+.comp-mark-reach {
+  font-size: 0.8rem;
+  width: 100%;
+  color: var(--muted);
+}
+.comp-mark-reach.clinch {
+  color: #4ade80;
+}
+.comp-mark-reach.short {
+  color: #fbbf24;
+}
+.comp-goal {
+  margin: -0.1rem 0 0.2rem 2rem;
+  font-size: 0.8rem;
+  color: #fbbf24;
+}
+.comp-goal.clinch {
+  color: #4ade80;
 }

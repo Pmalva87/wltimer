@@ -9,6 +9,7 @@ import { renderView } from "./screens/view";
 import { renderComp } from "./screens/comp";
 import { renderCompEdit } from "./screens/compedit";
 import { renderCompetitions } from "./screens/competitions";
+import { renderRunComp } from "./screens/runcomp";
 import { lastTab, rememberTab } from "./tabs";
 
 type Cleanup = (() => void) | void;
@@ -49,6 +50,8 @@ async function route() {
     cleanup = await renderCompetitions(app);
   } else if (screen === "comp" && slug) {
     cleanup = await renderComp(app, slug);
+  } else if (screen === "runcomp" && slug) {
+    cleanup = await renderRunComp(app, slug);
   } else if (screen === "compedit") {
     // No slug is a meet that does not exist yet — the same shape the builder
     // uses for a new workout.

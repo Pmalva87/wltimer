@@ -2,7 +2,7 @@ import { api, fmtDuration, todayStr, type CompSummary, type DayEntryInfo, type P
 import { copyText } from "../clipboard";
 import { compRow } from "./comp";
 import { tabBar } from "../tabs";
-import { esc, noRestChip } from "./library";
+import { armDelete, esc, noRestChip } from "./library";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -270,6 +270,14 @@ export async function renderCalendar(root: HTMLElement, dateArg: string | null) 
     root.querySelector("#movecancel")?.addEventListener("click", () => {
       movingIdx = null;
       void render();
+    });
+
+    root.querySelectorAll<HTMLButtonElement>("button.compdelete").forEach((btn) => {
+      const label = btn.textContent ?? "🗑";
+      armDelete(btn, label, async () => {
+        await api.deleteCompetition(btn.dataset.slug!);
+        await render();
+      });
     });
 
     root.querySelectorAll<HTMLButtonElement>("button.delete").forEach((btn) => {

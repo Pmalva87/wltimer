@@ -2,6 +2,8 @@ import {
   api,
   effectiveRegistered,
   fmtKg,
+  isPastCompetition,
+  nextWarmupKg,
   newCompetition,
   todayStr,
   type Attempt,
@@ -58,6 +60,7 @@ export async function renderCompEdit(root: HTMLElement, slug: string | null) {
         <header class="topbar">
           <a class="btn" href="${backHash}">‹ Back</a>
           <h1>${slug ? "Edit meet" : "New meet"}</h1>
+          ${slug ? `<a class="btn" href="#/runcomp/${encodeURIComponent(slug)}">▶ Run</a>` : ""}
           <button class="btn primary" id="save">Save</button>
         </header>
         <div class="view-scroll">
@@ -105,7 +108,15 @@ export async function renderCompEdit(root: HTMLElement, slug: string | null) {
           </div>
           ${
             showAttempts
-              ? liftSection("Snatch", "snatch", c.snatch) + liftSection("Clean & Jerk", "clean_jerk", c.clean_jerk)
+              ? `${
+                  isPastCompetition(c)
+                    ? ""
+                    : `<div class="comp-hint">Weights here are a plan — mark what actually happened from ${
+                        slug
+                          ? `the <a href="#/runcomp/${encodeURIComponent(slug)}">Run screen</a> on the day`
+                          : "the Run screen, once this meet is saved"
+                      }.</div>`
+                }${liftSection("Snatch", "snatch", c.snatch, isPastCompetition(c))}${liftSection("Clean & Jerk", "clean_jerk", c.clean_jerk, isPastCompetition(c))}`
               : `<div class="empty small">Nothing declared yet — add attempts once you know what you are opening with.</div>`
           }
 
@@ -190,7 +201,14 @@ export async function renderCompEdit(root: HTMLElement, slug: string | null) {
     }
 
     on("name", "input", (el) => (c.name = el.value));
-    on("date", "change", (el) => (c.date = text(el.value)));
+    // Re-rendered rather than mutated in place like the fields below: the
+    // date is what decides whether attempts below are a plan or a record —
+    // crossing into the past needs to unlock the result toggle right away,
+    // not on the next unrelated render.
+    on("date", "change", (el) => {
+      c.date = text(el.value);
+      render();
+    });
     bindOrgPicker(
       "organizer",
       "single",
@@ -229,7 +247,7 @@ export async function renderCompEdit(root: HTMLElement, slug: string | null) {
         entry.attempts[i] =
           el.value.trim() === "" || Number.isNaN(kg) || kg <= 0
             ? null
-            : { kg, result: entry.attempts[i]?.result ?? "declared" };
+            : { kg, result: entry.attempts[i]?.result ?? "planned" };
         // The result button's label follows the slot, so it has to be redrawn
         // when a weight appears or disappears under it.
         const btn = root.querySelector<HTMLButtonElement>(
@@ -246,9 +264,10 @@ export async function renderCompEdit(root: HTMLElement, slug: string | null) {
         if (!a) return;
         // Round-trip rather than one-way: a mis-tap is undone by tapping on.
         const next: Record<AttemptResult, AttemptResult> = {
+          planned: "declared",
           declared: "good",
           good: "miss",
-          miss: "declared",
+          miss: "planned",
         };
         a.result = next[a.result];
         setResultLabel(btn, a);
@@ -260,7 +279,7 @@ export async function renderCompEdit(root: HTMLElement, slug: string | null) {
       btn.addEventListener("click", () => {
         const entry = liftOf(btn.dataset.warmadd!);
         const last = entry.warmup[entry.warmup.length - 1];
-        entry.warmup.push({ kg: last ? last.kg + 10 : 20, reps: last?.reps ?? 2, done: false });
+        entry.warmup.push({ kg: nextWarmupKg(entry), reps: last?.reps ?? 2, done: false });
         render();
       }),
     );
@@ -393,7 +412,7 @@ export async function renderCompEdit(root: HTMLElement, slug: string | null) {
 }
 
 /** Is there anything on this lift worth showing? */
-function hasLiftData(entry: LiftEntry): boolean {
+export function hasLiftData(entry: LiftEntry): boolean {
   return entry.attempts.some((a) => a !== null) || entry.warmup.length > 0;
 }
 
@@ -454,7 +473,13 @@ function field(label: string, input: string, hint?: string): string {
     </label>`;
 }
 
-function liftSection(title: string, key: string, entry: LiftEntry): string {
+/**
+ * The attempts + warmup editor for one lift, shared by the meet editor and
+ * the Run screen. `editable` gates only the result — good/miss is what
+ * happened, and that is a Run-screen fact (or one an already-past meet can
+ * be corrected on); the weight is always yours to plan, meet day or not.
+ */
+export function liftSection(title: string, key: string, entry: LiftEntry, editable: boolean): string {
   const attempts = entry.attempts
     .map(
       (a, i) => `
@@ -462,7 +487,11 @@ function liftSection(title: string, key: string, entry: LiftEntry): string {
         <span class="comp-attempt-n">${i + 1}</span>
         <input class="text-input" type="number" inputmode="decimal" step="0.5"
                data-attempt="${i}" data-lift="${key}" value="${a ? fmtKg(a.kg) : ""}" placeholder="kg">
-        <button class="btn comp-result-btn" data-result="${i}" data-lift="${key}">${resultLabel(a)}</button>
+        ${
+          editable
+            ? `<button class="btn comp-result-btn" data-result="${i}" data-lift="${key}">${resultLabel(a)}</button>`
+            : `<span class="btn comp-result-btn readonly">${resultLabel(a)}</span>`
+        }
       </div>`,
     )
     .join("");
@@ -493,12 +522,12 @@ function liftSection(title: string, key: string, entry: LiftEntry): string {
     <div class="comp-edit-attempts">${attempts}</div>`;
 }
 
-function resultLabel(a: Attempt | null): string {
+export function resultLabel(a: Attempt | null): string {
   if (!a) return "—";
-  return a.result === "good" ? "✓ good" : a.result === "miss" ? "✗ no lift" : "declared";
+  return a.result === "good" ? "✓ good" : a.result === "miss" ? "✗ no lift" : a.result;
 }
 
-function setResultLabel(btn: HTMLButtonElement, a: Attempt | null) {
+export function setResultLabel(btn: HTMLButtonElement, a: Attempt | null) {
   btn.textContent = resultLabel(a);
   btn.className = `btn comp-result-btn ${a ? a.result : ""}`;
 }
