@@ -87,7 +87,15 @@ export async function renderMeet(root: HTMLElement, slugArg: string) {
 
   const liftOf = (k: string): LiftEntry => (k === "snatch" ? c.snatch : c.clean_jerk);
 
+  /** Mirrors `Competition::closed`: out of attempts, or a snatch overtaken
+   *  by a clean & jerk already taken. */
+  function liftOver(k: LiftKey): boolean {
+    const taken = (e: LiftEntry) => e.attempts.filter((a) => a && takenResult(a)).length;
+    return taken(liftOf(k)) === liftOf(k).attempts.length || (k === "snatch" && taken(c.clean_jerk) > 0);
+  }
+
   function currentWarm(k: LiftKey): number | null {
+    if (liftOver(k)) return null;
     const f = warmFocus[k];
     return f !== undefined && f < liftOf(k).warmup.length ? f : null;
   }
@@ -363,10 +371,15 @@ export async function renderMeet(root: HTMLElement, slugArg: string) {
     const wf = currentWarm(k);
     const af = currentAtt(k);
 
+    const over = liftOver(k);
+    // A finished lift's warmups are history: a small row to read, not sets to plan.
     const chips = entry.warmup
-      .map(
-        (w, i) =>
-          `<button class="comp-set rc-chip ${w.done ? "done" : ""} ${i === wf ? "focus" : ""}"
+      .map((w, i) =>
+        over
+          ? `<span class="comp-set ${w.done ? "done" : ""}">${w.done ? "✓" : "○"} ${fmtKg(w.kg)}${
+              w.reps > 1 ? ` × ${w.reps}` : ""
+            }</span>`
+          : `<button class="comp-set rc-chip ${w.done ? "done" : ""} ${i === wf ? "focus" : ""}"
                    data-act="warm" data-lift="${k}" data-i="${i}">${w.done ? "✓" : "○"} ${fmtKg(w.kg)}${
                      w.reps > 1 ? ` × ${w.reps}` : ""
                    }</button>`,
@@ -442,9 +455,9 @@ export async function renderMeet(root: HTMLElement, slugArg: string) {
           <h2>${name}</h2>
           <span class="view-part-total">${best != null ? `best ${fmtKg(best)}` : "—"}</span>
         </div>
-        <div class="comp-warmup">
+        <div class="comp-warmup ${over ? "over" : ""}">
           ${chips}
-          <button class="comp-set rc-chip rc-add" data-act="warmadd" data-lift="${k}">+ set</button>
+          ${over ? "" : `<button class="comp-set rc-chip rc-add" data-act="warmadd" data-lift="${k}">+ set</button>`}
         </div>
         ${warmStrip}
         <div class="comp-attempts">${attempts}</div>

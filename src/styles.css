@@ -1321,6 +1321,13 @@ a.ov-note {
 .comp-set.done {
   color: #4ade80;
 }
+.comp-warmup.over {
+  opacity: 0.7;
+}
+.comp-warmup.over .comp-set {
+  font-size: 0.75rem;
+  padding: 0.1rem 0.4rem;
+}
 
 .comp-mark {
   display: flex;
