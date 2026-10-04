@@ -184,3 +184,105 @@ not mention is left exactly as it is:
 - work: 1:00
 - rest: 1:00
 `;
+
+/** The competition-format specification, exportable like the other two so a
+ * meet can be written off the phone and uploaded. */
+export const COMP_FORMAT_GUIDE = `# wltimer competition format
+
+Write a weightlifting meet as a single markdown document in exactly this
+format. The app imports it through any upload button under Workouts — it
+recognises a meet by its \`- kind: competition\` line, whichever button you
+use. To put a meet inside a training plan instead, see the plan format guide:
+it is the same document one heading level deeper.
+
+Rules:
+
+- \`# Meet Name\` — exactly one, first heading in the file. Required.
+- \`- kind: competition\` — directly under the title. Required: it is what
+  makes the file a meet rather than a workout.
+- \`- id: <uuid>\` — app-managed. Omit it when writing a new meet; **keep it
+  exactly as it is** when revising one exported from the app, so the upload
+  updates that meet instead of adding a second copy. An upload replaces the
+  meet as it stands on the phone, ticked warmups and results included.
+- \`- updated: <timestamp>\` — app-managed; leave it alone or omit it.
+- Optional bullets under the title, each at most once unless noted:
+  - \`date\`: \`YYYY-MM-DD\`
+  - \`bodyweight\`: in kg, e.g. \`88.4\`
+  - \`category\`: the weight class you enter, free text, e.g. \`89 kg\`
+  - \`age group\`: e.g. \`M40\`, \`Senior\`, \`Junior\`
+  - \`org\`: who sanctions the meet, comma-separated, e.g. \`BWL, IWF\` (may repeat)
+  - \`organizer\`: who runs it
+  - \`target\`: a total you want on the day, number first, e.g. \`230 today\`
+    (may repeat)
+  - \`registered\`: \`yes\` or \`no\`
+- \`## Snatch\` and \`## Clean & Jerk\` — one section per lift, each optional.
+  - Attempts: \`- 1: <kg>\`, \`- 2: <kg>\`, \`- 3: <kg>\`, each followed by a
+    result word or nothing:
+    - \`planned\` — a weight you have not told the table yet
+    - nothing — declared, not yet lifted
+    - \`good\` / \`miss\` — taken
+  - Warmup sets: checkbox lines \`- [ ] <kg> x <reps>\` (reps default to 1;
+    \`- [x]\` marks a set done). Anywhere in the lift's section; a
+    \`### Warmup\` heading above them is optional. Write them lightest first.
+  - Any other line in a lift's section is free notes shown with that lift.
+- Weights are kilograms, whole or decimal (\`42.5\`).
+- \`## Qualification\` — optional: the entry standard of a meet you are
+  chasing, which your other meets' totals are checked against.
+  - \`- from: YYYY-MM-DD\`, \`- to: YYYY-MM-DD\` — the window a total must be
+    set in.
+  - \`- counts: BWL, FPH\` — whose meets count.
+  - \`- needs: <kg>\` — the total required. For a table (e.g. masters), one
+    \`### <age group> <class>\` row per standard, each with its own
+    \`- needs:\`.
+
+Example:
+
+# Nationals 2026
+- kind: competition
+- date: 2026-11-14
+- bodyweight: 88.4
+- category: 89 kg
+- org: BWL
+- age group: M40
+- target: 230 today
+
+## Snatch
+- 1: 95 planned
+- 2: 99 planned
+- 3: 102 planned
+
+### Warmup
+- [ ] 20 x 5
+- [ ] 50 x 3
+- [ ] 70 x 2
+- [ ] 85 x 1
+
+## Clean & Jerk
+- 1: 120 planned
+- 2: 125 planned
+- 3: 128 planned
+
+### Warmup
+- [ ] 60 x 3
+- [ ] 90 x 2
+- [ ] 110 x 1
+
+Example of a meet you are chasing:
+
+# Europeans 2027
+- kind: competition
+- date: 2027-05-20
+- age group: M40
+- category: 89 kg
+
+## Qualification
+- from: 2026-06-01
+- to: 2027-03-31
+- counts: BWL, IWF
+
+### M35 89 kg
+- needs: 215
+
+### M40 89 kg
+- needs: 205
+`;

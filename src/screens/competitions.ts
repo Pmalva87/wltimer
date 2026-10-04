@@ -2,6 +2,8 @@ import { api, type CompSummary } from "../api";
 import { compRow } from "./comp";
 import { armDelete, esc } from "./library";
 import { tabBar } from "../tabs";
+import { saveMarkdownFile } from "../files";
+import { COMP_FORMAT_GUIDE } from "../format";
 
 /**
  * The Competitions tab: meets you have lifted at or are chasing, plus the
@@ -51,7 +53,11 @@ export async function renderCompetitions(root: HTMLElement) {
 
           <div class="section-head">
             <h2>Meets</h2>
+            <div class="section-actions">
+              <button class="btn" id="compformat">📄 Format .md</button>
+            </div>
           </div>
+          <div id="compstatus" class="editor-status"></div>
           ${
             comps.length === 0
               ? `<div class="empty small">No competitions — add a meet to record its attempts, or one you are chasing to record what it takes to get in.</div>`
@@ -64,6 +70,12 @@ export async function renderCompetitions(root: HTMLElement) {
   }
 
   function bind() {
+    root.querySelector("#compformat")?.addEventListener("click", () => {
+      saveMarkdownFile("wltimer-competition-format.md", COMP_FORMAT_GUIDE);
+      const el = root.querySelector<HTMLElement>("#compstatus")!;
+      el.className = "editor-status valid";
+      el.textContent = "✓ competition format guide exported — give it to Claude to write a meet";
+    });
     const addOrg = async () => {
       const input = root.querySelector<HTMLInputElement>("#neworg")!;
       const name = input.value.trim();
