@@ -9,6 +9,7 @@ import {
   type CompView,
   type LiftEntry,
   type ParseError,
+  type WarmupSet,
 } from "../api";
 import { attemptGoals, fmtDay, group, marksSection, targetsSection, totalPanel, windowText } from "./comp";
 import { blankStandard } from "./compedit";
@@ -72,9 +73,11 @@ export async function renderMeet(root: HTMLElement, slugArg: string) {
   // The plan a no-lift shifted down, keyed by the missed slot, so taking the
   // miss back puts it back instead of leaving the shift behind.
   const shifted: Record<string, (Attempt | null)[]> = {};
-  // The attempts a warmup set raised, keyed by that set, for the same reason:
-  // each slot's weight before, and after.
-  const raised: Record<string, { from: (number | null)[]; to: (number | null)[] }> = {};
+  // The attempts a warmup set raised, for the same reason: each slot's weight
+  // before, and after. Keyed by the set itself, not its position — deleting
+  // or adding a set moves the others, and an index would then hand one set's
+  // undo to its neighbour.
+  const raised = new Map<WarmupSet, { from: (number | null)[]; to: (number | null)[] }>();
   // Which detail has its editor open: a field name, or `mark:<i>` for a row
   // of the entry standard. One at a time, like an attempt.
   let detail: string | null = null;
@@ -539,13 +542,12 @@ export async function renderMeet(root: HTMLElement, slugArg: string) {
   function toggleWarmDone(k: LiftKey, i: number) {
     const set = liftOf(k).warmup[i];
     set.done = !set.done;
-    const key = `${k}:${i}`;
     const opener = liftOf(k).attempts[0];
     const atts = liftOf(k).attempts;
     const weights = () => atts.map((a) => (a ? a.kg : null));
     if (!set.done) {
-      const r = raised[key];
-      delete raised[key];
+      const r = raised.get(set);
+      raised.delete(set);
       r?.to.forEach((to, j) => {
         const a = atts[j];
         if (a && !takenResult(a) && a.kg === to && r.from[j] !== null) a.kg = r.from[j]!;
@@ -560,7 +562,7 @@ export async function renderMeet(root: HTMLElement, slugArg: string) {
       const prev = atts[j - 1];
       if (a && prev && a.result === "planned" && a.kg <= prev.kg) a.kg = prev.kg + 1;
     }
-    raised[key] = { from, to: weights() };
+    raised.set(set, { from, to: weights() });
   }
 
   /**
