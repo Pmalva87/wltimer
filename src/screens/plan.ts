@@ -35,6 +35,24 @@ export async function renderPlan(root: HTMLElement, slug: string) {
     return `⧗ planned`;
   }
 
+  /** A meet lives under Competitions, not on the calendar as a workout. */
+  function meetRow(d: PlanDayView): string {
+    const state = !d.meet_slug
+      ? `<span class="meta-warn">not created yet — Sync adds it</span>`
+      : d.started
+        ? `✓ under way — a sync never touches it`
+        : d.edited
+          ? `✎ edited on the meet — a sync will leave it as it is`
+          : `⧗ planned`;
+    const title = `<span class="name">🏆 ${esc(d.name)}</span>
+        <span class="meta">${shortDate(d.date)} · ${state}</span>`;
+    return `
+      <div class="plan-day">
+        ${d.meet_slug ? `<a class="info tappable" href="#/comp/${encodeURIComponent(d.meet_slug)}">${title}</a>` : `<div class="info">${title}</div>`}
+        ${d.id ? `<button class="btn danger day-remove" data-id="${esc(d.id)}">🗑 Remove</button>` : ""}
+      </div>`;
+  }
+
   function dayRow(d: PlanDayView): string {
     // The entry can sit on another date: finishing a workout moves it to the
     // day it was done, and the plan still points at the day it asked for.
@@ -62,18 +80,23 @@ export async function renderPlan(root: HTMLElement, slug: string) {
    * you have to scan for.
    */
   function daySections(): string {
-    const todo = view.days.filter((d) => d.status !== "done");
-    const done = view.days.filter((d) => d.status === "done");
+    const meets = view.days.filter((d) => d.competition);
+    const training = view.days.filter((d) => !d.competition);
+    const todo = training.filter((d) => d.status !== "done");
+    const done = training.filter((d) => d.status === "done");
     if (view.days.length === 0) {
       return `<div class="empty small">This plan has no days.</div>`;
     }
-    const section = (title: string, days: PlanDayView[]) =>
+    const section = (title: string, days: PlanDayView[], row = dayRow) =>
       days.length === 0
         ? ""
-        : `<div class="plan-section">${title} · ${days.length}</div>${days.map(dayRow).join("")}`;
+        : `<div class="plan-section">${title} · ${days.length}</div>${days.map(row).join("")}`;
     return (
+      section("Competitions", meets, meetRow) +
       section("To do", todo) +
-      (todo.length === 0 ? `<div class="empty small">Every day of this plan is done. 💪</div>` : "") +
+      (todo.length === 0 && training.length > 0
+        ? `<div class="empty small">Every day of this plan is done. 💪</div>`
+        : "") +
       section("Done", done)
     );
   }
@@ -145,7 +168,10 @@ export async function renderPlan(root: HTMLElement, slug: string) {
 
     root.querySelector("#plansync")?.addEventListener("click", async () => {
       try {
-        showStatus(`✓ ${syncSummary(await api.syncPlan(slug))}`, true);
+        const report = await api.syncPlan(slug);
+        // Redrawn first: a sync can create the meet a row links to.
+        await render();
+        showStatus(`✓ ${syncSummary(report)}`, true);
       } catch (e) {
         showStatus(String(e), false);
       }

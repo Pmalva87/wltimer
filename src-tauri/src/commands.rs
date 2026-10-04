@@ -421,12 +421,13 @@ fn sync_upcoming(
         })
         .collect();
 
-    let (report, dirty) = plan::merge_into_calendar(plan, slug, from, plan_updated, &mut by_date);
+    let (mut report, dirty) = plan::merge_into_calendar(plan, slug, from, plan_updated, &mut by_date);
 
     for date in dirty {
         let entries = by_date.get(&date).map(Vec::as_slice).unwrap_or(&[]);
         let _ = state.days.save(&date, entries);
     }
+    report.meets = plan::merge_into_comps(plan, from, plan_updated, &state.comps);
     report
 }
 
@@ -505,7 +506,17 @@ pub fn import_plan(
 ) -> Result<PlanImport, Vec<ParseError>> {
     let now = now();
     let (summary, plan, counts) = state.plans.patch(&source, &now)?;
-    let sync = sync_upcoming(&state, &summary.slug, &plan, &now, &date_or_local(&today));
+    let mut sync = sync_upcoming(&state, &summary.slug, &plan, &now, &date_or_local(&today));
+    // The stored plan has dropped its removal markers by now, so the ones that
+    // name a meet are read from the file itself. `patch` succeeding has
+    // already proved it parses.
+    if let Ok(uploaded) = plan::parse_plan(&source) {
+        for id in uploaded.days.iter().filter(|d| d.deleted).filter_map(|d| d.id.as_deref()) {
+            if plan::remove_meet(&state.comps, id) {
+                sync.meets.removed += 1;
+            }
+        }
+    }
     Ok(PlanImport { summary, counts, sync })
 }
 
@@ -525,6 +536,12 @@ pub struct PlanDayView {
     /// The entry was changed after this version of the plan, so the next sync
     /// will leave it alone.
     pub edited: bool,
+    /// A meet rather than a training day. It has no calendar entry of its own,
+    /// so the `entry_*` fields and `status` stay empty and these say instead
+    /// where it lives and whether meet day has begun.
+    pub competition: bool,
+    pub meet_slug: Option<String>,
+    pub started: bool,
 }
 
 #[derive(Serialize)]
@@ -577,12 +594,34 @@ pub fn view_plan(state: State<AppState>, slug: String) -> Result<PlanView, Strin
         .days
         .iter()
         .map(|day| {
+            if day.competition {
+                let slug = day.id.as_deref().and_then(|id| state.comps.find_by_id(id));
+                let stored = slug.as_deref().and_then(|s| state.comps.read_source(s).ok());
+                return PlanDayView {
+                    id: day.id.clone(),
+                    name: day.name.clone(),
+                    date: day.date.clone(),
+                    total_secs: 0,
+                    entry_date: None,
+                    entry_index: None,
+                    status: None,
+                    edited: stored.as_deref().is_some_and(|s| {
+                        matches!((ids::extract_updated(s), &updated), (Some(m), Some(p)) if &m > p)
+                    }),
+                    competition: true,
+                    started: stored
+                        .as_deref()
+                        .and_then(|s| comp::parse_competition(s).ok())
+                        .is_some_and(|c| c.started()),
+                    meet_slug: slug,
+                };
+            }
             let found = day.id.as_deref().and_then(|id| located.get(id));
             PlanDayView {
                 id: day.id.clone(),
                 name: day.name.clone(),
                 date: day.date.clone(),
-                total_secs: parser::parse_workout(&day.workout_md)
+                total_secs: parser::parse_workout(&day.markdown)
                     .map(|w| w.total_secs())
                     .unwrap_or(0),
                 entry_date: found.map(|f| f.0.clone()),
@@ -592,6 +631,9 @@ pub fn view_plan(state: State<AppState>, slug: String) -> Result<PlanView, Strin
                     (Some(entry), Some(plan)) => entry > plan,
                     _ => false,
                 }),
+                competition: false,
+                meet_slug: None,
+                started: false,
             }
         })
         .collect();
@@ -631,7 +673,11 @@ pub fn delete_plan_day(
         .plans
         .save(&merged, Some(&slug), &now)
         .map_err(|e| format!("line {}: {}", e[0].line, e[0].message))?;
-    Ok(sync_upcoming(&state, &summary.slug, &plan, &now, &date_or_local(&today)))
+    let mut report = sync_upcoming(&state, &summary.slug, &plan, &now, &date_or_local(&today));
+    if plan::remove_meet(&state.comps, &day_id) {
+        report.meets.removed += 1;
+    }
+    Ok(report)
 }
 
 /// One calendar entry offered for picking when building a plan from history.

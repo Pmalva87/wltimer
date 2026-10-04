@@ -160,6 +160,13 @@ stamp (Sync cannot clobber your edits) while `save_plan`/`import_plan` pass the
 is). A `SyncReport` comes back rather than a count, because "1 kept as you
 edited it" is the part worth showing.
 
+A plan day carrying `- kind: competition` is a meet (`PlanDay::competition`):
+`merge_into_calendar` skips it and `merge_into_comps` writes it to the
+competitions store under the day's id, with the same stamp-based conflict rule
+plus one more — a meet that has `started()` (a warmup ticked, an attempt taken)
+is never rewritten. Meets are not removed for being absent from a plan, only by
+a `- deleted: true` marker or removing the day, and never once started.
+
 A plan has **two write paths, and which one a caller takes is a decision about
 deletion**. `PlanStore::patch` folds an uploaded file's `##` sections into the
 stored plan by workout id and never drops a day for being absent — that is what

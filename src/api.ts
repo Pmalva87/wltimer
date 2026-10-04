@@ -123,6 +123,11 @@ export interface PlanDayView {
   status: DayStatus | null;
   /** Edited on the calendar since this version of the plan. */
   edited: boolean;
+  /** A meet: no calendar entry, so `entry_*` and `status` stay null. */
+  competition: boolean;
+  meet_slug: string | null;
+  /** Warmup or lifting under way — a sync never touches it again. */
+  started: boolean;
 }
 
 export interface PlanView {
@@ -159,6 +164,17 @@ export interface SyncReport {
   kept: number;
   done: number;
   unscheduled: number;
+  /** The plan's meets, counted apart from its training days. */
+  meets: MeetSync;
+}
+
+export interface MeetSync {
+  added: number;
+  updated: number;
+  /** Edited on the meet's own screen since this version of the plan. */
+  kept: number;
+  started: number;
+  removed: number;
 }
 
 // ---- competitions ----

@@ -155,7 +155,13 @@ pub fn ensure_id(source: &str) -> (String, String) {
 
 /// Return the document carrying exactly this id, replacing any it already had.
 pub fn set_id(source: &str, id: &str) -> String {
-    insert(&strip(source, ID_KEY), ID_KEY, id)
+    set_bullet(source, ID_KEY, id)
+}
+
+/// Return the document with this preamble bullet set to `val`, replacing any
+/// it already had.
+pub fn set_bullet(source: &str, key: &str, val: &str) -> String {
+    insert(&strip(source, key), key, val)
 }
 
 /// Stamp the document as changed at `now`, replacing any previous stamp.

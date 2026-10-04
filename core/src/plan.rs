@@ -4,7 +4,13 @@
 //! whose `###` headings are the exercises (same params/notes as a single
 //! workout). Each day converts to a standalone workout document (`##` → `#`,
 //! `###` → `##`) that gets scheduled on the calendar.
+//!
+//! A day carrying `- kind: competition` is a meet instead: it converts the same
+//! way into a competition document and goes to the competitions store, never
+//! onto the calendar as a workout (the calendar shows meets on its own).
 
+use crate::comp;
+use crate::comps::CompStore;
 use crate::days::{self, valid_date, DayEntry, DayStatus};
 use crate::ids;
 use crate::parser::{self, ParseError};
@@ -24,8 +30,12 @@ pub struct PlanDay {
     pub deleted: bool,
     pub date: String,
     pub name: String,
-    /// Standalone workout markdown for this day.
-    pub workout_md: String,
+    /// `- kind: competition` under the heading: this day is a meet, and
+    /// `markdown` is a competition document rather than a workout.
+    pub competition: bool,
+    /// The day as a standalone document — a workout, or a meet when
+    /// `competition` is set.
+    pub markdown: String,
     /// The day's stable id, carried in the plan file as an `- id:` bullet
     /// under its `## YYYY-MM-DD` heading and inherited by the calendar entry
     /// this day schedules. That inheritance is what lets a re-sync recognise
@@ -55,6 +65,22 @@ pub struct SyncReport {
     pub done: usize,
     /// Still-planned entries removed because the plan no longer has that day.
     pub unscheduled: usize,
+    /// What became of the plan's meets, counted apart from its training days:
+    /// "2 days scheduled" must never be read as including a competition.
+    pub meets: MeetSync,
+}
+
+/// What a sync did to the competitions store.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct MeetSync {
+    pub added: usize,
+    pub updated: usize,
+    /// Edited on the meet's own screen since this version of the plan.
+    pub kept: usize,
+    /// Warmup or lifting already under way, which a sync never touches.
+    pub started: usize,
+    /// Removed because the plan asked for its day to go.
+    pub removed: usize,
 }
 
 impl SyncReport {
@@ -141,13 +167,7 @@ pub fn parse_plan(source: &str) -> Result<Plan, Vec<ParseError>> {
                 errors.push(err(line_no, "unexpected extra '#' title — use '## YYYY-MM-DD: Name' for days"));
             }
         } else if let Some(day) = builders.last_mut() {
-            // Demote exercise headings one level for the standalone document.
-            let transformed = if let Some(rest) = trimmed.strip_prefix("### ") {
-                format!("## {rest}")
-            } else {
-                raw.to_string()
-            };
-            day.lines.push(transformed);
+            day.lines.push(raw.to_string());
             day.line_map.push(line_no);
         }
         // Lines between the plan title and the first day are ignored.
@@ -166,15 +186,40 @@ pub fn parse_plan(source: &str) -> Result<Plan, Vec<ParseError>> {
 
     let mut days: Vec<PlanDay> = Vec::new();
     for b in builders {
-        let workout_md = format!("# {}\n{}\n", b.name, b.lines.join("\n"));
+        let raw = format!("# {}\n{}\n", b.name, b.lines.join("\n"));
+        let competition = comp::looks_like_competition(&raw);
+        // Demote the day's headings one level for the standalone document,
+        // line for line so error lines still map back. A meet nests one level
+        // deeper than a workout (`#### Warmup` under `### Snatch`); a workout
+        // keeps its deeper headings as written, since they are only notes.
+        let lines: Vec<String> = b
+            .lines
+            .iter()
+            .map(|raw| {
+                let trimmed = raw.trim();
+                if let Some(rest) = trimmed.strip_prefix("### ") {
+                    format!("## {rest}")
+                } else if let Some(rest) = trimmed.strip_prefix("#### ").filter(|_| competition) {
+                    format!("### {rest}")
+                } else {
+                    raw.clone()
+                }
+            })
+            .collect();
+        let markdown = format!("# {}\n{}\n", b.name, lines.join("\n"));
         // A section asking for its day to be removed carries no exercises, so
         // it is not held to what a workout must contain — its id and its date
         // are the whole of it.
-        let deleted = section_deleted(&workout_md);
-        // Validate the day as a standalone workout, mapping error lines back
+        let deleted = section_deleted(&markdown);
+        // Validate the day as a standalone document, mapping error lines back
         // to their position in the plan file (line 1 is the synthetic title).
         if !deleted {
-            if let Err(day_errors) = parser::parse_workout(&workout_md) {
+            let checked = if competition {
+                comp::parse_competition(&markdown).map(|_| ())
+            } else {
+                parser::parse_workout(&markdown).map(|_| ())
+            };
+            if let Err(day_errors) = checked {
                 for e in day_errors {
                     let orig = if e.line <= 1 {
                         b.heading_line
@@ -192,11 +237,17 @@ pub fn parse_plan(source: &str) -> Result<Plan, Vec<ParseError>> {
         //
         // Two days sharing an id, though, would make sync ambiguous about
         // which entry each one owns, so that stays an error.
-        let id = ids::extract_id(&workout_md);
+        // The heading is the meet's date: one place to move it, as for a day.
+        let markdown = if competition {
+            ids::set_bullet(&markdown, "date", &b.date)
+        } else {
+            markdown
+        };
+        let id = ids::extract_id(&markdown);
         if id.is_some() && days.iter().any(|d: &PlanDay| d.id == id) {
             errors.push(err(b.heading_line, format!("duplicate day id on '{}'", b.date)));
         }
-        days.push(PlanDay { deleted, date: b.date, name: b.name, workout_md, id });
+        days.push(PlanDay { deleted, date: b.date, name: b.name, competition, markdown, id });
     }
     // Stable, so two days on one date keep the order they were written in —
     // which is the only thing that says which came first that day.
@@ -249,7 +300,8 @@ pub fn merge_into_calendar(
     let plan_ids: HashSet<&str> = plan
         .days
         .iter()
-        .filter(|d| !d.deleted)
+        // A day turned into a meet no longer owns a workout on the calendar.
+        .filter(|d| !d.deleted && !d.competition)
         .filter_map(|d| d.id.as_deref())
         .collect();
 
@@ -262,7 +314,11 @@ pub fn merge_into_calendar(
         })
     }
 
-    for day in plan.days.iter().filter(|d| !d.deleted && d.date.as_str() >= from) {
+    for day in plan
+        .days
+        .iter()
+        .filter(|d| !d.deleted && !d.competition && d.date.as_str() >= from)
+    {
         match day.id.as_deref().and_then(|id| locate(by_date, id)) {
             Some((date, i)) => {
                 if by_date[&date][i].status == DayStatus::Done {
@@ -280,7 +336,7 @@ pub fn merge_into_calendar(
                 }
                 let mut entry = by_date.get_mut(&date).unwrap().remove(i);
                 dirty.insert(date);
-                entry.markdown = ids::set_updated(&day.workout_md, plan_updated);
+                entry.markdown = ids::set_updated(&day.markdown, plan_updated);
                 entry.source_plan = Some(slug.to_string());
                 // Re-dated in the plan file? The entry moves and keeps its id
                 // (and so its identity) rather than being destroyed and rebuilt.
@@ -312,7 +368,7 @@ pub fn merge_into_calendar(
                     continue;
                 }
                 by_date.entry(day.date.clone()).or_default().push(DayEntry {
-                    markdown: ids::set_updated(&day.workout_md, plan_updated),
+                    markdown: ids::set_updated(&day.markdown, plan_updated),
                     status: DayStatus::Planned,
                     completed_at: None,
                     source_slug: None,
@@ -339,6 +395,65 @@ pub fn merge_into_calendar(
     }
 
     (report, dirty)
+}
+
+/// Merge a plan's meets into the competitions store, from `from` onward.
+///
+/// The same identity and conflict rules as [`merge_into_calendar`]: a meet is
+/// matched by the id its plan section carries, so a re-sync updates it rather
+/// than adding a second one, and a meet edited on its own screen since this
+/// version of the plan is left as it is. Where a day has "done", a meet has
+/// [`Competition::started`](comp::Competition::started) — once a warmup set is
+/// ticked off it is meet day, and nothing a plan says replaces it.
+///
+/// Meets are never removed for being absent from the plan: a meet holds a
+/// result as well as a plan for one, and dropping it is asked for by name (a
+/// `- deleted: true` section, or removing the day on the plan screen).
+pub fn merge_into_comps(plan: &Plan, from: &str, plan_updated: &str, comps: &CompStore) -> MeetSync {
+    let mut report = MeetSync::default();
+    for day in plan
+        .days
+        .iter()
+        .filter(|d| !d.deleted && d.competition && d.date.as_str() >= from)
+    {
+        // A stored plan gives every day an id; one without could only ever be
+        // added, and would be added again on every sync.
+        let Some(id) = day.id.as_deref() else { continue };
+        let owner = comps.find_by_id(id);
+        if let Some(slug) = owner.as_deref() {
+            let Ok(stored) = comps.read_source(slug) else { continue };
+            if comp::parse_competition(&stored).is_ok_and(|c| c.started()) {
+                report.started += 1;
+                continue;
+            }
+            if ids::extract_updated(&stored).is_some_and(|edited| edited.as_str() > plan_updated) {
+                report.kept += 1;
+                continue;
+            }
+        }
+        if comps.save(&day.markdown, owner.as_deref(), plan_updated).is_ok() {
+            if owner.is_some() {
+                report.updated += 1;
+            } else {
+                report.added += 1;
+            }
+        }
+    }
+    report
+}
+
+/// Remove the meet a plan day scheduled, unless meet day has begun — the
+/// counterpart for meets of unscheduling a still-planned day. Whether `id`
+/// names a meet at all is for the store to say: a removal marker carries only
+/// an id. Returns whether one was removed.
+pub fn remove_meet(comps: &CompStore, id: &str) -> bool {
+    let Some(slug) = comps.find_by_id(id) else { return false };
+    let started = comps
+        .read_source(&slug)
+        .ok()
+        .and_then(|s| comp::parse_competition(&s).ok())
+        .is_some_and(|c| c.started());
+    !started && comps.delete(&slug).is_ok()
 }
 
 /// Build a plan document from calendar days: `(date, workout markdown)` in the
@@ -860,7 +975,7 @@ Brace hard.
         assert_eq!(p.days[0].date, "2026-07-30");
         assert_eq!(p.days[0].name, "Heavy Squats");
         // Each day's markdown is a valid standalone workout.
-        let w = parser::parse_workout(&p.days[0].workout_md).unwrap();
+        let w = parser::parse_workout(&p.days[0].markdown).unwrap();
         assert_eq!(w.name, "Heavy Squats");
         assert_eq!(w.blocks[0].name, "Back Squat");
         assert_eq!(w.blocks[0].work_secs, 120);
@@ -1003,8 +1118,8 @@ Brace hard.
         assert_eq!((counts.updated, counts.added, counts.removed), (1, 0, 0));
         assert_eq!(merged.days.len(), 2, "the untouched day is still there");
         assert_eq!(merged.days[0].name, "Heavy Squats");
-        assert!(merged.days[0].workout_md.contains("Brace hard."));
-        assert!(merged.days[1].workout_md.contains("- work: 1:30"));
+        assert!(merged.days[0].markdown.contains("Brace hard."));
+        assert!(merged.days[1].markdown.contains("- work: 1:30"));
         // Identity survives, which is what lets the sync update the calendar
         // entry this day already scheduled.
         assert_eq!(merged.days[1].id.as_deref(), Some(second.as_str()));
@@ -1070,11 +1185,11 @@ Brace hard.
         assert_eq!(plan.days.len(), 2);
         assert_eq!(plan.days[0].name, "Heavy Squats");
         assert_eq!(plan.days[1].name, "Evening Cardio");
-        assert!(plan.days[0].workout_md.contains("Brace hard."));
+        assert!(plan.days[0].markdown.contains("Brace hard."));
         assert_eq!(plan.days[0].id, ids::extract_id(&squats));
         assert_eq!(plan.days[1].id, ids::extract_id(&cardio));
         // The workout each day converts back to is the one that went in.
-        let back = parser::parse_workout(&plan.days[0].workout_md).unwrap();
+        let back = parser::parse_workout(&plan.days[0].markdown).unwrap();
         let original = parser::parse_workout(&squats).unwrap();
         assert_eq!(back, original);
     }
@@ -1469,5 +1584,112 @@ Brace hard.
         let (report, _) = merge_into_calendar(&plan, "531-cycle-1", "2026-08-01", NOW, &mut cal);
         assert_eq!(report.written(), 1);
         assert!(!cal.contains_key("2026-07-30"));
+    }
+
+    const MEET_PLAN: &str = "\
+# Road to Nationals
+
+## 2026-11-10: Openers
+- id: 0b6f3d1e-2a4c-4e8b-9c7d-5f1a2b3c4d5e
+### Snatch
+- work: 1:00
+
+## 2026-11-14: Nationals
+- id: 7d2e9c40-1f3b-4a6d-8e5c-9b0a1c2d3e4f
+- kind: competition
+- bodyweight: 88.4
+### Snatch
+- 1: 95 planned
+#### Warmup
+- [ ] 20 x 5
+- [ ] 60 x 2
+
+### Clean & Jerk
+- 1: 120 planned
+";
+    const MEET_ID: &str = "7d2e9c40-1f3b-4a6d-8e5c-9b0a1c2d3e4f";
+
+    fn comp_store(tag: &str) -> CompStore {
+        let dir = std::env::temp_dir().join(format!("wltimer-plan-comps-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        CompStore::new(dir).unwrap()
+    }
+
+    fn stored_meet(comps: &CompStore) -> comp::Competition {
+        let slug = comps.find_by_id(MEET_ID).expect("meet stored");
+        comp::parse_competition(&comps.read_source(&slug).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn a_competition_day_converts_to_a_meet_dated_by_its_heading() {
+        let p = parse_plan(MEET_PLAN).unwrap();
+        assert!(!p.days[0].competition);
+        let meet = &p.days[1];
+        assert!(meet.competition);
+        let c = comp::parse_competition(&meet.markdown).unwrap();
+        assert_eq!(c.name, "Nationals");
+        assert_eq!(c.date.as_deref(), Some("2026-11-14"));
+        assert_eq!(c.snatch.warmup.len(), 2);
+        assert_eq!(c.clean_jerk.attempts[0].unwrap().kg, 120.0);
+    }
+
+    #[test]
+    fn a_broken_meet_in_a_plan_is_reported_on_its_own_line() {
+        let src = MEET_PLAN.replace("- 1: 120 planned", "- 1: heavy");
+        let errs = parse_plan(&src).unwrap_err();
+        let line = src.lines().position(|l| l == "- 1: heavy").unwrap() + 1;
+        assert_eq!(errs[0].line, line);
+    }
+
+    #[test]
+    fn a_meet_is_not_scheduled_as_a_workout() {
+        let p = parse_plan(MEET_PLAN).unwrap();
+        let mut cal = BTreeMap::new();
+        let (report, _) = merge_into_calendar(&p, "road", "2026-11-01", NOW, &mut cal);
+        assert_eq!(report.scheduled, 1);
+        assert!(!cal.contains_key("2026-11-14"));
+    }
+
+    #[test]
+    fn syncing_a_meet_twice_updates_it_instead_of_adding_another() {
+        let comps = comp_store("twice");
+        let p = parse_plan(MEET_PLAN).unwrap();
+        let first = merge_into_comps(&p, "2026-11-01", NOW, &comps);
+        assert_eq!(first.added, 1);
+        let fixed = parse_plan(&MEET_PLAN.replace("- [ ] 60 x 2", "- [ ] 60 x 2\n- [ ] 80 x 1")).unwrap();
+        let second = merge_into_comps(&fixed, "2026-11-01", LATER, &comps);
+        assert_eq!((second.added, second.updated), (0, 1));
+        assert_eq!(comps.list().len(), 1);
+        assert_eq!(stored_meet(&comps).snatch.warmup.len(), 3);
+    }
+
+    #[test]
+    fn a_meet_whose_warmup_has_begun_is_never_resynced() {
+        let comps = comp_store("started");
+        let p = parse_plan(MEET_PLAN).unwrap();
+        merge_into_comps(&p, "2026-11-01", NOW, &comps);
+        let slug = comps.find_by_id(MEET_ID).unwrap();
+        let ticked = comps.read_source(&slug).unwrap().replace("- [ ] 20 x 5", "- [x] 20 x 5");
+        // Saved before the plan's next version, so only "started" can hold it.
+        comps.save(&ticked, Some(&slug), NOW).unwrap();
+        let fixed = parse_plan(&MEET_PLAN.replace("95 planned", "97 planned")).unwrap();
+        let report = merge_into_comps(&fixed, "2026-11-01", LATER, &comps);
+        assert_eq!((report.updated, report.started), (0, 1));
+        assert_eq!(stored_meet(&comps).snatch.attempts[0].unwrap().kg, 95.0);
+        assert!(!remove_meet(&comps, MEET_ID));
+    }
+
+    #[test]
+    fn a_meet_edited_since_the_plan_is_kept_until_a_newer_plan_arrives() {
+        let comps = comp_store("edited");
+        let p = parse_plan(MEET_PLAN).unwrap();
+        merge_into_comps(&p, "2026-11-01", NOW, &comps);
+        let slug = comps.find_by_id(MEET_ID).unwrap();
+        let edited = comps.read_source(&slug).unwrap().replace("88.4", "88.9");
+        comps.save(&edited, Some(&slug), "2026-08-09T20:00:00Z").unwrap();
+        assert_eq!(merge_into_comps(&p, "2026-11-01", NOW, &comps).kept, 1);
+        assert_eq!(merge_into_comps(&p, "2026-11-01", LATER, &comps).updated, 1);
+        assert!(remove_meet(&comps, MEET_ID));
+        assert!(comps.find_by_id(MEET_ID).is_none());
     }
 }

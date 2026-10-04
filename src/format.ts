@@ -110,6 +110,15 @@ Rules:
   seconds (e.g. \`90\`).
 - Every other line inside an exercise is free markdown shown on screen while
   it runs (cues, notes, target weights).
+- \`- kind: competition\` — under a day's heading, alongside its \`- id:\`: this
+  day is a **meet**, not a workout. It goes to the app's competitions, not onto
+  the calendar as training. Write it as a competition document one heading
+  level deeper — \`### Snatch\` and \`### Clean & Jerk\` holding
+  \`- <n>: <kg> planned\` attempts and \`- [ ] <kg> x <reps>\` warmup lines
+  (optionally under \`#### Warmup\`) — plus any of \`- bodyweight:\`,
+  \`- category:\`, \`- age group:\`, \`- org:\`, \`- target:\` under the heading.
+  The heading's date is the meet's date. Once its warmup has begun on the
+  phone, a meet is never changed by a plan again.
 - Re-importing a plan matches each day to what it scheduled before, by id, from
   today onward: edited days are updated in place, and re-dated days move and
   keep their history. A day you have already completed is never replaced and
@@ -138,6 +147,22 @@ Brace hard, hit depth, drive up fast.
 ### Bench Press
 - intervals: 3
 - work: 1:00
+
+## 2026-11-14: Nationals
+- id: 7d2e9c40-1f3b-4a6d-8e5c-9b0a1c2d3e4f
+- kind: competition
+- category: 89 kg
+### Snatch
+- 1: 95 planned
+- 2: 99 planned
+- 3: 102 planned
+#### Warmup
+- [ ] 20 x 5
+- [ ] 60 x 2
+- [ ] 85 x 1
+
+### Clean & Jerk
+- 1: 120 planned
 - rest: 0:45
 
 Example of a fix — upload this to change only these two days of the plan

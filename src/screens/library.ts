@@ -5,6 +5,7 @@ import {
   type ImportReport,
   type ParseError,
   type PlanImport,
+  type MeetSync,
   type SyncReport,
 } from "../api";
 import { copyText } from "../clipboard";
@@ -44,7 +45,18 @@ export function syncSummary(s: SyncReport): string {
   if (parts.length === 0) parts.push("calendar unchanged");
   if (s.kept) parts.push(`${s.kept} kept as you edited ${s.kept === 1 ? "it" : "them"}`);
   if (s.done) parts.push(`${plural(s.done, "day", "days")} already done`);
-  return parts.join(", ");
+  return parts.join(", ") + meetSummary(s.meets);
+}
+
+/** The meets a sync touched, as their own clause so they never read as days. */
+function meetSummary(m: MeetSync): string {
+  const parts: string[] = [];
+  if (m.added) parts.push(`${plural(m.added, "meet", "meets")} added`);
+  if (m.updated) parts.push(`${plural(m.updated, "meet", "meets")} updated`);
+  if (m.removed) parts.push(`${plural(m.removed, "meet", "meets")} removed`);
+  if (m.kept) parts.push(`${plural(m.kept, "meet", "meets")} kept as you edited ${m.kept === 1 ? "it" : "them"}`);
+  if (m.started) parts.push(`${plural(m.started, "meet", "meets")} already started`);
+  return parts.length ? ` · 🏆 ${parts.join(", ")}` : "";
 }
 
 /**

@@ -443,6 +443,16 @@ impl LiftEntry {
 }
 
 impl Competition {
+    /// Whether meet day has begun: a warmup set ticked off or an attempt
+    /// taken. From then on the meet is a record of the day, and a plan sync
+    /// never rewrites it — a plan knows what you meant to lift, not what you did.
+    pub fn started(&self) -> bool {
+        Lift::ALL.iter().any(|&l| {
+            let e = self.lift(l);
+            e.taken() > 0 || e.warmup.iter().any(|w| w.done)
+        })
+    }
+
     pub fn total(&self) -> TotalState {
         if self.snatch.bombed_out() || self.clean_jerk.bombed_out() {
             return TotalState::BombedOut;

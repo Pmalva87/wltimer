@@ -227,6 +227,35 @@ which class a past total counts in is a rule federations write differently. The
 meet that satisfied a mark is shown with the class it was set in, so you can
 judge it.
 
+### Meets in a plan
+
+A plan can carry its meets alongside its training days, so a whole cycle is
+one file. A day section with `- kind: competition` under its heading is a meet,
+written exactly as a meet file but one heading level deeper (`### Snatch`,
+`#### Warmup`); the heading's date is the meet's date.
+
+```markdown
+## 2026-11-14: Nationals
+- id: 7d2e9c40-1f3b-4a6d-8e5c-9b0a1c2d3e4f
+- kind: competition
+### Snatch
+- 1: 95 planned
+#### Warmup
+- [ ] 20 x 5
+- [ ] 60 x 2
+```
+
+A sync puts it under **Competitions** — never on the calendar as a workout,
+though the calendar shows it on its date like any meet — and the plan screen
+lists a plan's meets apart from its training days, as does the sync's report.
+The day's id is the meet's id, so re-syncing or re-uploading updates that meet
+instead of adding a second one. **Once a warmup set is ticked off, or an
+attempt taken, the meet is never re-synced**: from then on it is the record of
+the day. Before that, a meet you edited on its own screen is kept as you left
+it until a newer version of the plan arrives, the same rule as a calendar day.
+A meet is removed only when asked — removing the day on the plan screen, or a
+`- deleted: true` section — and never once it has started.
+
 ## Calendar
 
 The 📅 calendar schedules workouts on dates: upload a `.md`, pick from the
