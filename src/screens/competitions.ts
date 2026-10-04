@@ -1,4 +1,4 @@
-import { api, type CompSummary } from "../api";
+import { api, todayStr, type CompSummary } from "../api";
 import { compRow } from "./comp";
 import { armDelete, esc } from "./library";
 import { tabBar } from "../tabs";
@@ -17,6 +17,21 @@ export async function renderCompetitions(root: HTMLElement) {
   // A name a meet uses is offered from the meet itself, so it has no ✕ here:
   // deleting it would only bring it straight back.
   const inUse = new Set((await api.organizationsInUse()).map((n) => n.toLowerCase()));
+
+  /**
+   * The list arrives already ordered around today; this only labels the split.
+   * An undated meet is not history, so it stays with what is to come.
+   */
+  function meetSections(): string {
+    const today = todayStr();
+    const done = comps.filter((c) => c.date !== null && c.date < today);
+    const upcoming = comps.filter((c) => !done.includes(c));
+    const section = (title: string, list: CompSummary[]) =>
+      list.length === 0
+        ? ""
+        : `<div class="plan-section">${title} · ${list.length}</div>${list.map(compRow).join("")}`;
+    return section("Upcoming", upcoming) + section("Done", done);
+  }
 
   function render() {
     root.innerHTML = `
@@ -61,7 +76,7 @@ export async function renderCompetitions(root: HTMLElement) {
           ${
             comps.length === 0
               ? `<div class="empty small">No competitions — add a meet to record its attempts, or one you are chasing to record what it takes to get in.</div>`
-              : comps.map(compRow).join("")
+              : meetSections()
           }
         </div>
         ${tabBar("competitions")}
