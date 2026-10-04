@@ -3,6 +3,7 @@ import {
   effectiveRegistered,
   fmtKg,
   nextWarmupKg,
+  todayStr,
   type Attempt,
   type AttemptResult,
   type Competition,
@@ -153,6 +154,12 @@ export async function renderMeet(root: HTMLElement, slugArg: string) {
       `<button class="rc-chip rc-meta-chip ${value ? "" : "rc-add"} ${detail === f ? "focus" : ""}"
                data-act="detail" data-f="${f}">${value ?? empty}</button>`;
     const registered = effectiveRegistered(c);
+    // Registering is a question before the meet: once its date is past, or a
+    // warmup is ticked or an attempt taken, you are evidently in.
+    const begun = [c.snatch, c.clean_jerk].some(
+      (e) => e.warmup.some((w) => w.done) || e.attempts.some((a) => a && takenResult(a)),
+    );
+    const over = begun || (c.date !== null && c.date < todayStr());
     const chips = [
       chip("date", c.date ? `📅 ${fmtDay(c.date)}` : null, "+ date"),
       chip("organizer", c.organizer ? `🏛 ${esc(c.organizer)}` : null, "+ federation"),
@@ -161,9 +168,11 @@ export async function renderMeet(root: HTMLElement, slugArg: string) {
       chip("age", c.age_group ? esc(c.age_group) : null, "+ age group"),
       chip("bodyweight", c.bodyweight != null ? `${fmtKg(c.bodyweight)} kg bw` : null, "+ bodyweight"),
       // One tap flips it: there is nothing to type.
-      `<button class="rc-chip rc-meta-chip ${registered ? "" : "warn"}" data-act="registered">${
-        registered ? "✓ registered" : "⚠ not registered"
-      }</button>`,
+      over
+        ? ""
+        : `<button class="rc-chip rc-meta-chip ${registered ? "" : "warn"}" data-act="registered">${
+            registered ? "✓ registered" : "⚠ not registered"
+          }</button>`,
     ];
     const open = detail && detail !== "name" && !detail.startsWith("mark:") && detail !== "window" && detail !== "counts";
     return `<div class="rc-meta">${chips.join("")}</div>${open ? detailStrip(detail!) : ""}`;

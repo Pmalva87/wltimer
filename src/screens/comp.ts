@@ -1,5 +1,6 @@
 import {
   fmtKg,
+  todayStr,
   type CompSummary,
   type CompView,
   type Lift,
@@ -52,7 +53,10 @@ export function compRow(c: CompSummary): string {
   } else if (c.standards > 0) {
     bits.push(`🎯 ${c.standards} mark${c.standards === 1 ? "" : "s"} to get in`);
   }
-  if (!c.registered) {
+  // Registering is a question before the meet; once it is behind you, or
+  // you are on the platform, the answer no longer matters.
+  const over = (c.date !== null && c.date < todayStr()) || c.attempts_taken > 0;
+  if (!c.registered && !over) {
     bits.push(`<span class="meta-warn">⚠ not registered</span>`);
   }
   return `<div class="workout">
