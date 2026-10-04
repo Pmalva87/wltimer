@@ -550,6 +550,20 @@ export async function renderMeet(root: HTMLElement, slugArg: string) {
     raised[key] = { from, to: weights() };
   }
 
+  /**
+   * The sets still to do climb, lightest first, in the slots the done ones
+   * leave free. A done set stays where it is: that is the order you took
+   * them in.
+   */
+  function sortPending(k: LiftKey) {
+    const w = liftOf(k).warmup;
+    const pending = w.filter((s) => !s.done).sort((a, b) => a.kg - b.kg);
+    let p = 0;
+    w.forEach((s, i) => {
+      if (!s.done) w[i] = pending[p++];
+    });
+  }
+
   function takenResult(a: Attempt): boolean {
     return a.result === "good" || a.result === "miss";
   }
@@ -629,12 +643,16 @@ export async function renderMeet(root: HTMLElement, slugArg: string) {
         break;
       case "warmdel":
         entry!.warmup.splice(i, 1);
+        sortPending(k);
         warmFocus[k] = undefined;
         changed();
         break;
       case "warmadd": {
-        entry!.warmup.push({ kg: nextWarmupKg(entry!), reps: 1, done: false });
-        warmFocus[k] = entry!.warmup.length - 1;
+        const set = { kg: nextWarmupKg(entry!), reps: 1, done: false };
+        entry!.warmup.push(set);
+        sortPending(k);
+        // The new set is open wherever it sorted to, ready to be weighed.
+        warmFocus[k] = entry!.warmup.indexOf(set);
         changed();
         break;
       }
