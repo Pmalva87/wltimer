@@ -190,9 +190,9 @@ not mention is left exactly as it is:
 export const COMP_FORMAT_GUIDE = `# wltimer competition format
 
 Write a weightlifting meet as a single markdown document in exactly this
-format. The app imports it through any upload button under Workouts — it
-recognises a meet by its \`- kind: competition\` line, whichever button you
-use. To put a meet inside a training plan instead, see the plan format guide:
+format. Upload it with **📂 Upload** on the Competitions screen (any upload
+button under Workouts takes it too — a meet is recognised by its
+\`- kind: competition\` line). To put a meet inside a training plan instead, see the plan format guide:
 it is the same document one heading level deeper.
 
 Rules:

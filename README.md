@@ -138,7 +138,9 @@ winning one it has not earned.
 A competition is not a workout — there is no clock the app owns — so it is a
 document of its own, reached from **Workouts → Competitions**. It holds the
 three attempts of each lift, the warmup you tick off on the way to the
-platform, and what the meet totals.
+platform, and what the meet totals. A meet written off the phone comes in
+through **📂 Upload** on the Competitions screen; **📄 Format .md** beside it
+exports the format below as a guide to hand to whoever writes it.
 
 ```markdown
 # Nationals 2026

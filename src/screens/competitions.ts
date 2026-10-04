@@ -1,4 +1,4 @@
-import { api, todayStr, type CompSummary } from "../api";
+import { api, todayStr, type CompSummary, type ParseError } from "../api";
 import { compRow } from "./comp";
 import { armDelete, esc } from "./library";
 import { tabBar } from "../tabs";
@@ -12,7 +12,7 @@ import { COMP_FORMAT_GUIDE } from "../format";
  * anything reads them, so there is nothing to gain from a second menu.
  */
 export async function renderCompetitions(root: HTMLElement) {
-  const comps: CompSummary[] = await api.listCompetitions();
+  let comps: CompSummary[] = await api.listCompetitions();
   let organizations: string[] = await api.listOrganizations();
   // A name a meet uses is offered from the meet itself, so it has no ✕ here:
   // deleting it would only bring it straight back.
@@ -69,6 +69,7 @@ export async function renderCompetitions(root: HTMLElement) {
           <div class="section-head">
             <h2>Meets</h2>
             <div class="section-actions">
+              <button class="btn" id="compupload">📂 Upload</button>
               <button class="btn" id="compformat">📄 Format .md</button>
             </div>
           </div>
@@ -80,16 +81,44 @@ export async function renderCompetitions(root: HTMLElement) {
           }
         </div>
         ${tabBar("competitions")}
+        <input type="file" id="compfile" accept=".md,.markdown,.txt" hidden>
       </div>`;
     bind();
+  }
+
+  function showStatus(msg: string, ok: boolean) {
+    const el = root.querySelector<HTMLElement>("#compstatus");
+    if (!el) return;
+    el.className = `editor-status ${ok ? "valid" : "invalid"}`;
+    el.textContent = msg;
   }
 
   function bind() {
     root.querySelector("#compformat")?.addEventListener("click", () => {
       saveMarkdownFile("wltimer-competition-format.md", COMP_FORMAT_GUIDE);
-      const el = root.querySelector<HTMLElement>("#compstatus")!;
-      el.className = "editor-status valid";
-      el.textContent = "✓ competition format guide exported — give it to Claude to write a meet";
+      showStatus("✓ competition format guide exported — give it to Claude to write a meet", true);
+    });
+    const file = root.querySelector<HTMLInputElement>("#compfile")!;
+    root.querySelector("#compupload")?.addEventListener("click", () => file.click());
+    file.addEventListener("change", async () => {
+      const f = file.files?.[0];
+      if (!f) return;
+      const text = await f.text();
+      // Only meets land here. A plan or workout has its own upload under
+      // Workouts, and guessing would file it somewhere you are not looking.
+      if (!(await api.isCompetition(text))) {
+        showStatus("not a meet — it needs '- kind: competition' under its title (plans and workouts upload under Workouts)", false);
+        return;
+      }
+      try {
+        const sum = await api.importCompetition(text);
+        comps = await api.listCompetitions();
+        render();
+        showStatus(`✓ "${sum.name}" imported`, true);
+      } catch (e) {
+        const errs = e as ParseError[];
+        showStatus(Array.isArray(errs) && errs[0] ? `line ${errs[0].line}: ${errs[0].message}` : String(e), false);
+      }
     });
     const addOrg = async () => {
       const input = root.querySelector<HTMLInputElement>("#neworg")!;
