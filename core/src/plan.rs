@@ -422,7 +422,7 @@ pub fn merge_into_comps(plan: &Plan, from: &str, plan_updated: &str, comps: &Com
         let owner = comps.find_by_id(id);
         if let Some(slug) = owner.as_deref() {
             let Ok(stored) = comps.read_source(slug) else { continue };
-            if comp::parse_competition(&stored).is_ok_and(|c| c.started()) {
+            if comps.started(slug) {
                 report.started += 1;
                 continue;
             }
@@ -448,12 +448,7 @@ pub fn merge_into_comps(plan: &Plan, from: &str, plan_updated: &str, comps: &Com
 /// an id. Returns whether one was removed.
 pub fn remove_meet(comps: &CompStore, id: &str) -> bool {
     let Some(slug) = comps.find_by_id(id) else { return false };
-    let started = comps
-        .read_source(&slug)
-        .ok()
-        .and_then(|s| comp::parse_competition(&s).ok())
-        .is_some_and(|c| c.started());
-    !started && comps.delete(&slug).is_ok()
+    !comps.started(&slug) && comps.delete(&slug).is_ok()
 }
 
 /// Build a plan document from calendar days: `(date, workout markdown)` in the

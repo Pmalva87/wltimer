@@ -203,7 +203,8 @@ Rules:
 - \`- id: <uuid>\` — app-managed. Omit it when writing a new meet; **keep it
   exactly as it is** when revising one exported from the app, so the upload
   updates that meet instead of adding a second copy. An upload replaces the
-  meet as it stands on the phone, ticked warmups and results included.
+  meet as it stands on the phone — until meet day has begun there: once a
+  warmup set is ticked or an attempt taken, an upload of it is refused.
 - \`- updated: <timestamp>\` — app-managed; leave it alone or omit it.
 - Optional bullets under the title, each at most once unless noted:
   - \`date\`: \`YYYY-MM-DD\`

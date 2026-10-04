@@ -180,6 +180,10 @@ platform, and what the meet totals.
 - `- kind: competition` — what makes this a meet rather than a workout. It is
   how an uploaded `.md` is routed by what it is rather than by which button it
   came through, the same way a backup file is.
+- `- id:` — as everywhere, what makes uploading a revised meet update it rather
+  than add a copy. An upload is refused once that meet has begun on the phone
+  (a warmup ticked or an attempt taken): the file knows the plan, the phone
+  knows the day.
 - `- org:` — who sanctioned the meet. A **list**, because one meet often
   answers to more than one body, and that is what decides where its result
   travels: an international held in Portugal can be the thing that qualifies

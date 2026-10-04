@@ -1266,6 +1266,13 @@ pub fn save_competition(
     state.comps.save(&source, prev_slug.as_deref(), &now())
 }
 
+/// An uploaded meet file. Unlike `save_competition`, which the meet's own
+/// screens use, it will not replace a meet that has begun.
+#[tauri::command]
+pub fn import_competition(state: State<AppState>, source: String) -> Result<CompSummary, Vec<ParseError>> {
+    state.comps.import(&source, &now())
+}
+
 #[tauri::command]
 pub fn delete_competition(state: State<AppState>, slug: String) -> Result<(), String> {
     state.comps.delete(&slug)

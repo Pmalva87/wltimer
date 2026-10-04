@@ -66,6 +66,7 @@ pub fn run() {
             commands::parse_competition_full,
             commands::serialize_competition,
             commands::save_competition,
+            commands::import_competition,
             commands::delete_competition,
             commands::view_competition,
             commands::list_organizations,

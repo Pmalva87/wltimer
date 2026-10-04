@@ -256,7 +256,7 @@ export async function renderLibrary(root: HTMLElement) {
       if (bundle.status === "ok") {
         message = restoreSummary(await api.importBundle(text));
       } else if (await api.isCompetition(text)) {
-        const sum = await api.saveCompetition(text, null);
+        const sum = await api.importCompetition(text);
         message = `✓ "${sum.name}" imported`;
       } else if ((await api.parsePlanPreview(text)).status === "ok") {
         message = planImportSummary(await api.importPlan(text));

@@ -262,6 +262,33 @@ impl CompStore {
         Ok(summary)
     }
 
+    /// Whether the stored meet has begun — see [`Competition::started`].
+    pub fn started(&self, slug: &str) -> bool {
+        self.read_source(slug)
+            .ok()
+            .and_then(|s| comp::parse_competition(&s).ok())
+            .is_some_and(|c| c.started())
+    }
+
+    /// Save an uploaded meet file — [`Self::save`], refusing to replace a meet
+    /// that has begun. A file written off the phone knows the plan, not the
+    /// day, so landing on top of ticked warmups and taken attempts would erase
+    /// the one record of them. The meet's own screen saves through `save`.
+    pub fn import(&self, source: &str, now: &str) -> Result<CompSummary, Vec<ParseError>> {
+        comp::parse_competition(source)?;
+        if let Some(slug) = ids::extract_id(source).and_then(|id| self.find_by_id(&id)) {
+            if self.started(&slug) {
+                return Err(vec![ParseError {
+                    line: 1,
+                    message: "that meet is already under way on this phone — its warmups and \
+                              attempts are kept, so the upload was not applied"
+                        .into(),
+                }]);
+            }
+        }
+        self.save(source, None, now)
+    }
+
     pub fn delete(&self, slug: &str) -> Result<(), String> {
         fs::remove_file(self.path(slug)).map_err(|_| format!("cannot delete '{slug}'"))
     }
@@ -280,6 +307,20 @@ mod tests {
     }
 
     const MEET: &str = "# Lisbon Open\n- kind: competition\n- date: 2026-05-10\n- org: FPH\n";
+
+    #[test]
+    fn an_upload_never_lands_on_a_meet_that_has_begun() {
+        let store = temp_store("import-started");
+        let id = "5a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
+        let meet = format!("# Nationals\n- id: {id}\n- kind: competition\n\n## Snatch\n- 1: 95 planned\n- [ ] 20 x 5\n");
+        let slug = store.import(&meet, NOW).unwrap().slug;
+        // Not begun: an upload is a fix, and replaces it.
+        store.import(&meet.replace("95 planned", "97 planned"), NOW).unwrap();
+        store.save(&meet.replace("- [ ] 20", "- [x] 20"), Some(&slug), NOW).unwrap();
+        assert!(store.import(&meet.replace("95 planned", "99 planned"), NOW).is_err());
+        assert!(store.read_source(&slug).unwrap().contains("- [x] 20"));
+        assert_eq!(store.list().len(), 1);
+    }
 
     #[test]
     fn a_meet_whose_mark_is_already_met_lists_the_best_total_that_met_it() {

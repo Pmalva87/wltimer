@@ -546,6 +546,8 @@ export const api = {
   /** The document format has one writer, in Rust — the editor sends the meet. */
   serializeCompetition: (competition: Competition) =>
     invoke<string>("serialize_competition", { competition }),
+  /** An uploaded meet file; refused if it would replace a meet under way. */
+  importCompetition: (source: string) => invoke<CompSummary>("import_competition", { source }),
   saveCompetition: (source: string, prevSlug: string | null) =>
     invoke<CompSummary>("save_competition", { source, prevSlug }),
   deleteCompetition: (slug: string) => invoke<void>("delete_competition", { slug }),
