@@ -86,7 +86,7 @@ function started(view: CompView): boolean {
   return [...c.snatch.attempts, ...c.clean_jerk.attempts].some((a) => a && (a.result === "good" || a.result === "miss"));
 }
 
-export function totalPanel(view: CompView): string {
+export function totalPanel(view: CompView, extra = ""): string {
   const notes: string[] = [];
   // A projection that lands on the total already made says nothing: the
   // meet is over, or nothing heavier is written. Only a number still to lift
@@ -116,6 +116,7 @@ export function totalPanel(view: CompView): string {
       <span class="comp-total-label">Total</span>
       <span class="comp-total-value">${totalText(view.total)}</span>
       ${possible}
+      ${extra}
     </section>`;
 }
 

@@ -117,7 +117,14 @@ export async function renderMeet(root: HTMLElement, slugArg: string) {
     return w.length ? w[w.length - 1].kg + 5 : 20;
   }
 
+  /** Both lifts closed: the meet is a result now, and its details are read
+   *  rather than filled in — they move next to what they describe. */
+  function finished(): boolean {
+    return liftOver("snatch") && liftOver("clean_jerk");
+  }
+
   function render() {
+    const done = finished();
     const scroll = root.querySelector(".view-scroll")?.scrollTop ?? 0;
     root.innerHTML = `
       <div class="screen viewer">
@@ -128,14 +135,20 @@ export async function renderMeet(root: HTMLElement, slugArg: string) {
         <div class="view-scroll">
           <button class="view-title rc-title ${detail === "name" ? "focus" : ""}" data-act="detail" data-f="name">🏆 ${
             esc(c.name) || "(no name)"
+          }${
+            done && c.date
+              ? ` <span class="rc-title-date ${detail === "date" ? "focus" : ""}" data-act="detail" data-f="date">${fmtDay(c.date)}</span>`
+              : ""
           }</button>
           ${detail === "name" ? detailStrip("name") : ""}
-          ${metaChips()}
-          ${totalPanel(view)}
+          ${done ? stripFor(["date"]) : metaChips()}
+          ${totalPanel(view, done ? entryChips() : "")}
+          ${done ? stripFor(["category", "age", "bodyweight"]) : ""}
           ${targetsSection(view)}
           ${LIFTS.map(([k, name]) => liftCard(k, name)).join("")}
           ${marksSection(view)}
           ${standardSection()}
+          ${done ? hostChips() : ""}
           <div class="comp-danger"><button class="btn danger" id="deletemeet">🗑 Delete this meet</button></div>
         </div>
       </div>`;
@@ -149,10 +162,37 @@ export async function renderMeet(root: HTMLElement, slugArg: string) {
   /** The meet's details as chips: tap one to edit it under the row. A detail
    *  not written yet is a dashed `+` chip, so what is missing is visible
    *  without a form to scan. */
-  function metaChips(): string {
-    const chip = (f: string, value: string | null, empty: string) =>
-      `<button class="rc-chip rc-meta-chip ${value ? "" : "rc-add"} ${detail === f ? "focus" : ""}"
+  function chip(f: string, value: string | null, empty: string): string {
+    return `<button class="rc-chip rc-meta-chip ${value ? "" : "rc-add"} ${detail === f ? "focus" : ""}"
                data-act="detail" data-f="${f}">${value ?? empty}</button>`;
+  }
+
+  /** The editor for whichever of these details is open, if any. */
+  function stripFor(fields: string[]): string {
+    return detail && fields.includes(detail) ? detailStrip(detail) : "";
+  }
+
+  /** What you entered as, for the total of a finished meet: only what was
+   *  written, since an empty slot there is not a question any more. */
+  function entryChips(): string {
+    const chips = [
+      c.category ? chip("category", esc(c.category), "") : "",
+      c.age_group ? chip("age", esc(c.age_group), "") : "",
+      c.bodyweight != null ? chip("bodyweight", `${fmtKg(c.bodyweight)} kg bw`, "") : "",
+    ].join("");
+    return chips ? `<div class="rc-meta comp-total-entry">${chips}</div>` : "";
+  }
+
+  /** Who ran and sanctioned a finished meet, at the foot of the page. */
+  function hostChips(): string {
+    const chips = [
+      c.organizer ? chip("organizer", `🏛 ${esc(c.organizer)}`, "") : "",
+      c.orgs.length ? chip("orgs", esc(c.orgs.join(" · ")), "") : "",
+    ].join("");
+    return chips ? `<div class="rc-meta">${chips}</div>${stripFor(["organizer", "orgs"])}` : "";
+  }
+
+  function metaChips(): string {
     const registered = effectiveRegistered(c);
     // Registering is a question before the meet: once its date is past, or a
     // warmup is ticked or an attempt taken, you are evidently in.

@@ -1632,6 +1632,22 @@ button.rc-attempt.empty {
   font-size: 0.85rem;
   padding: 0.3rem 0.65rem;
 }
+.rc-title-date {
+  font-size: 0.85rem;
+  font-weight: 400;
+  color: var(--muted);
+  padding: 0.1rem 0.35rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.rc-title-date.focus {
+  border-color: var(--accent);
+}
+.comp-total-entry {
+  justify-content: center;
+  margin: 0.4rem 0 0;
+}
 .rc-meta-chip.warn {
   color: #fbbf24;
 }
