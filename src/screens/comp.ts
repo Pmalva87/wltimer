@@ -111,13 +111,18 @@ export function totalPanel(view: CompView, extra = ""): string {
     );
   }
   const possible = notes.map((n) => `<span class="comp-total-note">${n}</span>`).join("");
-  return `
-    <section class="comp-total ${view.total.state}">
+  // `extra` sits beside the total rather than under it: the number is what
+  // the panel is for, and what it was lifted as is a footnote to it.
+  const main = `
       <span class="comp-total-label">Total</span>
       <span class="comp-total-value">${totalText(view.total)}</span>
-      ${possible}
-      ${extra}
-    </section>`;
+      ${possible}`;
+  return extra
+    ? `<section class="comp-total ${view.total.state} with-side">
+         <div class="comp-total-main">${main}</div>
+         <div class="comp-total-side">${extra}</div>
+       </section>`
+    : `<section class="comp-total ${view.total.state}">${main}</section>`;
 }
 
 function totalText(t: TotalState): string {

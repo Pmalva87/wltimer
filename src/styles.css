@@ -1644,9 +1644,30 @@ button.rc-attempt.empty {
 .rc-title-date.focus {
   border-color: var(--accent);
 }
-.comp-total-entry {
-  justify-content: center;
-  margin: 0.4rem 0 0;
+.comp-total.with-side {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.75rem;
+}
+.comp-total-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+}
+.comp-total-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+  max-width: 45%;
+}
+.comp-total-side .rc-meta-chip {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.55rem;
+  text-align: right;
 }
 .rc-meta-chip.warn {
   color: #fbbf24;

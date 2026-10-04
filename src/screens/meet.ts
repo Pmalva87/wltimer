@@ -138,7 +138,7 @@ export async function renderMeet(root: HTMLElement, slugArg: string) {
           }${
             c.date || !done
               ? ` <span class="rc-title-date ${c.date ? "" : "rc-add"} ${detail === "date" ? "focus" : ""}" data-act="detail" data-f="date">${
-                  c.date ? fmtDay(c.date) : "+ date"
+                  c.date ? `📅 ${fmtDay(c.date)}` : "+ date"
                 }</span>`
               : ""
           }</button>
@@ -189,7 +189,7 @@ export async function renderMeet(root: HTMLElement, slugArg: string) {
       optChip("bodyweight", c.bodyweight != null ? `${fmtKg(c.bodyweight)} kg bw` : null, "+ bodyweight", done),
       registeredChip(),
     ].join("");
-    return chips ? `<div class="rc-meta comp-total-entry">${chips}</div>` : "";
+    return chips;
   }
 
   /** Who runs and sanctions the meet, at the foot of the page: worth having,
