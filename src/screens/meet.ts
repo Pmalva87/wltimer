@@ -149,7 +149,7 @@ export async function renderMeet(root: HTMLElement, slugArg: string) {
           ${targetsSection(view)}
           ${LIFTS.map(([k, name]) => liftCard(k, name)).join("")}
           ${marksSection(view)}
-          ${standardSection()}
+          ${standardSection(done)}
           ${hostChips(done)}
           <div class="comp-danger"><button class="btn danger" id="deletemeet">🗑 Delete this meet</button></div>
         </div>
@@ -286,8 +286,11 @@ export async function renderMeet(root: HTMLElement, slugArg: string) {
    *  which meets count as chips, each mark as a row. Whether a mark is already
    *  met comes from the last save — it is the server that reads the other
    *  meets — so a row being typed into shows no verdict until it lands. */
-  function standardSection(): string {
+  function standardSection(done: boolean): string {
     const q = c.qualification;
+    // Getting in is behind you once the meet is lifted; an empty section
+    // inviting you to add a standard would be asking about the past.
+    if (!q && done) return "";
     if (!q) {
       return `
         <section class="view-part">
