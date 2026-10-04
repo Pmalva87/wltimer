@@ -60,7 +60,8 @@ export const PLAN_FORMAT_GUIDE = `# wltimer training-plan format
 
 Write a multi-day training plan as a single markdown document in exactly this
 format. The app imports such files directly ("Upload plan") and schedules each
-dated section as a workout on its calendar.
+dated section as a workout on its calendar — or, when the section is marked as
+a competition, adds it to the app's competitions instead.
 
 Rules:
 
@@ -147,6 +148,7 @@ Brace hard, hit depth, drive up fast.
 ### Bench Press
 - intervals: 3
 - work: 1:00
+- rest: 0:45
 
 ## 2026-11-14: Nationals
 - id: 7d2e9c40-1f3b-4a6d-8e5c-9b0a1c2d3e4f
@@ -163,7 +165,6 @@ Brace hard, hit depth, drive up fast.
 
 ### Clean & Jerk
 - 1: 120 planned
-- rest: 0:45
 
 Example of a fix — upload this to change only these two days of the plan
 above, dropping the squats and reworking the bench. Everything the file does
