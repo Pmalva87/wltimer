@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 use wltimer_core::bundle::{self, ImportReport};
 use wltimer_core::comp::{self, Competition};
-use wltimer_core::comps::{CompStore, CompSummary};
+use wltimer_core::comps::{self, CompStore, CompSummary};
 use wltimer_core::days::{self, DayEntry, DayStatus, DayStore, DaySummary};
 use wltimer_core::engine::{Cue, Engine, Snapshot};
 use wltimer_core::ids;
@@ -1223,8 +1223,10 @@ pub enum CompParse {
 }
 
 #[tauri::command]
-pub fn list_competitions(state: State<AppState>) -> Vec<CompSummary> {
-    state.comps.list()
+pub fn list_competitions(state: State<AppState>, today: String) -> Vec<CompSummary> {
+    let mut list = state.comps.list();
+    comps::order_from(&mut list, &date_or_local(&today));
+    list
 }
 
 #[tauri::command]

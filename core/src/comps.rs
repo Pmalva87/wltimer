@@ -82,6 +82,29 @@ fn qualified(c: &Competition, all: &[Competition]) -> Option<QualifiedBy> {
     })
 }
 
+/// The Competitions list's order: what is still to come, soonest first and
+/// starting from today, then the meets already behind you, most recent first.
+/// Both halves read outward from now, which is where you are looking from.
+///
+/// A meet with no date sits between the two: it is one you have not pinned
+/// down, so not history, but not next up either. `today` comes from the shell,
+/// since `core` has no clock.
+pub fn order_from(list: &mut [CompSummary], today: &str) {
+    // 0 = upcoming, 1 = undated, 2 = past.
+    let group = |s: &CompSummary| match s.date.as_deref() {
+        Some(d) if d >= today => 0,
+        None => 1,
+        Some(_) => 2,
+    };
+    list.sort_by(|a, b| {
+        group(a).cmp(&group(b)).then_with(|| match (group(a), &a.date, &b.date) {
+            (2, Some(x), Some(y)) => y.cmp(x),
+            (_, Some(x), Some(y)) => x.cmp(y),
+            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+        })
+    });
+}
+
 fn slug_of(path: &Path) -> Option<String> {
     let name = path.file_name().and_then(|n| n.to_str())?;
     let slug = name.strip_suffix(".md.zst")?;
@@ -140,12 +163,9 @@ impl CompStore {
             .map(|(slug, _)| slug)
     }
 
-    /// Chronological, earliest date first — the most recent line in the story
-    /// leads, and the more distant a date the lower it sits, whether that
-    /// distance runs into the past or the future. A meet with no date sorts
-    /// last rather than first: it is one you have not pinned down, not one
-    /// that happened at the dawn of time, and an undated row at the top of
-    /// the list would read as next up.
+    /// Chronological, earliest date first, undated last — a stable order for
+    /// callers that have no today to read from. The Competitions screen's own
+    /// order, split around today, is [`order_from`].
     pub fn list(&self) -> Vec<CompSummary> {
         let parsed: Vec<(String, Result<Competition, Vec<ParseError>>)> = self
             .stored()
@@ -307,6 +327,25 @@ mod tests {
     }
 
     const MEET: &str = "# Lisbon Open\n- kind: competition\n- date: 2026-05-10\n- org: FPH\n";
+
+    #[test]
+    fn upcoming_meets_lead_soonest_first_and_past_ones_follow_newest_first() {
+        let s = temp_store("order");
+        for (name, date) in [
+            ("Old", Some("2025-03-01")),
+            ("Next", Some("2026-10-04")),
+            ("Later", Some("2026-12-01")),
+            ("Recent", Some("2026-09-20")),
+            ("Someday", None),
+        ] {
+            let date = date.map_or(String::new(), |d| format!("- date: {d}\n"));
+            s.save(&format!("# {name}\n- kind: competition\n{date}"), None, NOW).unwrap();
+        }
+        let mut list = s.list();
+        order_from(&mut list, "2026-10-04");
+        let names: Vec<String> = list.into_iter().map(|c| c.name).collect();
+        assert_eq!(names, ["Next", "Later", "Someday", "Recent", "Old"]);
+    }
 
     #[test]
     fn an_upload_never_lands_on_a_meet_that_has_begun() {

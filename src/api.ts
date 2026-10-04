@@ -537,7 +537,7 @@ export const api = {
   syncPlan: (slug: string) =>
     invoke<SyncReport>("sync_plan", { slug, today: todayStr() }),
   deletePlan: (slug: string) => invoke<void>("delete_plan", { slug }),
-  listCompetitions: () => invoke<CompSummary[]>("list_competitions"),
+  listCompetitions: () => invoke<CompSummary[]>("list_competitions", { today: todayStr() }),
   getCompetitionSource: (slug: string) =>
     invoke<string>("get_competition_source", { slug }),
   isCompetition: (source: string) => invoke<boolean>("is_competition", { source }),
